@@ -8,8 +8,8 @@ Base URL: `http://127.0.0.1:8765`
 | Tasks | `GET /api/tasks`, `GET /api/tasks/{id}`, `POST /api/tasks` |
 | Agent config | `PATCH /api/tasks/{id}/agent` |
 | Lifecycle | `POST /api/tasks/{id}/retry`, `POST /api/tasks/{id}/cancel` |
-| Pool | `GET /api/pool`, `POST /api/pool/pause`, `/freeze`, `/resume` |
-| Runtime | `GET /api/quota`, `GET /api/models`, `GET /api/workers` |
+| Pool | `GET /api/pool`, `PATCH /api/pool`, `POST /api/pool/pause`, `/freeze`, `/resume` |
+| Runtime | `GET /api/quota`, `GET /api/models`, `GET /api/profiles`, `GET /api/workers` |
 | History | `GET /api/events?task_id=T001&limit=200` |
 
 Task creation body:

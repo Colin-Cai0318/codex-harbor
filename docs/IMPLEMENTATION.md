@@ -20,7 +20,7 @@ This document maps the product specification to implemented code and verificatio
 | 11 Linux/WSL2 | isolated execution backends | selection/unit coverage; full host matrix remains release validation |
 | 12 Windows Native | executable resolution, paths, process tree, file-lock-safe SQLite | current Windows test run; remains beta |
 | 13 Local API | loopback FastAPI endpoints | HTTP integration tests |
-| 14 Dashboard | lightweight HTML dashboard consuming only Local API | HTTP render/API tests |
+| 14 Dashboard | card-based lifecycle board with light/dark themes consuming only Local API | HTTP/API tests, emitted-JavaScript parser test, Edge visual QA |
 | 15 Skill/plugin | Development plugin and `harbor-tasks` skill under `integrations/plugins/codex-harbor` | plugin/skill validation plus loopback API helper smoke test |
 
 ## Important implementation choices

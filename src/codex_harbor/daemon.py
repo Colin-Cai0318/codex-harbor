@@ -37,7 +37,12 @@ async def serve(config_path: str | None = None) -> None:
             values,
             container.config.data_dir,
         )
-        app = create_app(container.repository, model_registry=registry)
+        app = create_app(
+            container.repository,
+            model_registry=registry,
+            max_workers=int(values["scheduler"]["max_workers"]),
+            profiles=values.get("profiles", {}),
+        )
         server = uvicorn.Server(
             uvicorn.Config(
                 app,

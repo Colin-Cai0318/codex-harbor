@@ -102,7 +102,8 @@ Daemon 统一管理一个 App Server 进程。模型和推理等级配置始终�
 - 支持本地 Linux、Windows Native 和 WSL 执行后端。
 - 保存恢复信封，并根据心跳识别失联 Worker。
 - 持久化任务历史和命令输出前，对 Authorization、API Key、Cookie 和密码脱敏。
-- 提供仅监听回环地址的 FastAPI 服务与轻量 Dashboard。
+- 提供仅监听回环地址的 FastAPI 服务，以及支持白天/黑夜主题的卡片式生命周期
+  Dashboard。
 
 ## 环境要求
 

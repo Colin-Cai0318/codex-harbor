@@ -164,6 +164,21 @@ class HarborRepository:
                     (task_id,),
                 )
             ]
+            latest_attempt = conn.execute(
+                """SELECT attempt_number, thread_id, started_at, finished_at, result,
+                          error_type, requested_model, requested_reasoning_effort,
+                          effective_model, effective_reasoning_effort
+                   FROM attempts WHERE task_id=? ORDER BY attempt_number DESC LIMIT 1""",
+                (task_id,),
+            ).fetchone()
+            task["latest_attempt"] = (
+                dict(latest_attempt) if latest_attempt is not None else None
+            )
+            worker = conn.execute(
+                "SELECT * FROM workers WHERE task_id=? ORDER BY started_at DESC LIMIT 1",
+                (task_id,),
+            ).fetchone()
+            task["worker"] = dict(worker) if worker is not None else None
             return task
 
     def list_tasks(self, statuses: Iterable[str] | None = None) -> list[dict[str, Any]]:
@@ -444,6 +459,19 @@ class HarborRepository:
                 (state, utc_now()),
             )
             self._event(conn, None, event_type or f"POOL_{state}", None)
+
+    def set_freeze_on_weekly_reset(self, enabled: bool) -> None:
+        with self.db.transaction(immediate=True) as conn:
+            conn.execute(
+                "UPDATE pool_state SET freeze_on_weekly_reset=?, updated_at=? WHERE id=1",
+                (int(enabled), utc_now()),
+            )
+            self._event(
+                conn,
+                None,
+                "POOL_WEEKLY_FREEZE_CHANGED",
+                {"enabled": enabled},
+            )
 
     def begin_weekly_drain(self, new_window: str) -> None:
         now = utc_now()

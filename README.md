@@ -107,7 +107,8 @@ and reasoning configuration, so agent state never leaks between tasks.
 - Persists recovery envelopes and detects stale worker heartbeats.
 - Captures task history and command output after redacting authorization,
   API-key, cookie, and password material.
-- Provides a loopback-only FastAPI service and lightweight dashboard.
+- Provides a loopback-only FastAPI service and a card-based lifecycle dashboard
+  with light and dark themes.
 
 ## Requirements
 

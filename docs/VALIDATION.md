@@ -13,7 +13,7 @@ Command:
 uv run pytest -q
 ```
 
-Result: 19 passed. The suite covers state transitions, dependency release, transactional admission behavior, priority, exclusive groups, weekly drain/freeze semantics, model capability rejection, pending agent configuration, secret sanitization, HTTP API/dashboard rendering, real temporary Git worktrees, Acceptance Runner behavior, Worker thread/attempt/envelope persistence, and successful/blocked outcomes.
+Result: 20 passed. The suite covers state transitions, dependency release, transactional admission behavior, priority, exclusive groups, weekly drain/freeze semantics, model capability rejection, pending agent configuration, secret sanitization, HTTP API/dashboard rendering, JavaScript syntax validation, real temporary Git worktrees, Acceptance Runner behavior, Worker thread/attempt/envelope persistence, and successful/blocked outcomes.
 
 ## Codex App Server Phase 0
 
@@ -44,6 +44,8 @@ This run found a false Weekly Reset classification caused by a provider revising
 `harbor doctor` passed Python, SQLite, Git, Codex executable resolution, App Server initialization, account read, dynamic Model Registry (six models observed), execution backend, database, and filesystem checks.
 
 A real daemon served the dashboard at `127.0.0.1:8765`; `/api/pool`, `/api/models`, the create-task form, task detail view, and the plugin's loopback API helper were exercised successfully. Repeated quota refreshes left the pool `RUNNING`, confirming the Weekly Reset regression fix against the live structured provider.
+
+The follow-up card-based task board was rendered in both light and dark themes with Microsoft Edge at 1600×1100. A populated preview verified lifecycle-lane placement and exact task status badges. The integration suite parses the emitted JavaScript with Node.js so Python string escaping cannot silently break browser startup again.
 
 ## Unverified release boundaries
 
