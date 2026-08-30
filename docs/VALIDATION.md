@@ -13,7 +13,17 @@ Command:
 uv run pytest -q
 ```
 
-Result: 22 passed. The suite covers state transitions, dependency release, transactional admission behavior, priority, exclusive groups, persisted runtime parallelism, weekly drain/freeze semantics, model capability rejection, pending agent configuration, secret sanitization, HTTP API/dashboard rendering, JavaScript syntax validation, real temporary Git worktrees, Acceptance Runner behavior, Worker thread/attempt/envelope persistence, and successful/blocked outcomes.
+Result: 25 passed. The suite covers state transitions, dependency release, transactional admission behavior, priority, exclusive groups, persisted runtime parallelism, weekly drain/freeze semantics, model capability rejection, pending agent configuration, secret sanitization, HTTP API/dashboard rendering, JavaScript syntax validation, real temporary Git worktrees, Acceptance Runner behavior, Worker thread/turn/envelope persistence, quota wait/resume on the same Thread, historical quota-failure migration, and successful/blocked outcomes.
+
+## Real 5-hour limit incident and repair
+
+The user's persisted `T001` supplied a real App Server error containing `codexErrorInfo: usageLimitExceeded`. Five Turns had been incorrectly classified as `AGENT_FAILURE`, exhausting `max_attempts` and leaving the Task `FAILED`. The root cause was a text classifier that recognized older 5-hour phrases but not the current structured error marker.
+
+The v3 migration and state-machine fix were validated against an online SQLite backup, not the live database. The copied `T001` migrated from `FAILED` to `WAIT_QUOTA`; all five historical records became `RATE_LIMIT_5H`/`WAIT_QUOTA`, `failure_count` became zero, and the existing Root Thread ID remained unchanged. The live database was deliberately left untouched while the old daemon continued running.
+
+A deterministic end-to-end regression then simulated the first Codex Turn returning the exact real error, quota becoming available, and a new Worker claiming the task. Evidence after completion: two retained execution records (`turn-quota`, `turn-resumed`), one Root Thread shared by both, `failure_count=0`, and a successful `thread/resume` path rather than a new session.
+
+The current live App Server also accepted `thread/name/set` for T001 without starting a Turn. A following `thread/read` returned the same durable Thread ID, the assigned `[T001] ...` name, and source `vscode`, confirming that Harbor is using the Codex-visible thread store rather than a detached transcript.
 
 ## Codex App Server Phase 0
 
@@ -51,7 +61,7 @@ The follow-up card-based task board was rendered in both light and dark themes w
 
 The following require longer-duration or additional-host release qualification and are not claimed by this Windows session:
 
-- observation across a real 5-hour exhaustion/reset and a real weekly reset;
+- observation across the reset half of a real 5-hour exhaustion/reset cycle and a real weekly reset;
 - destructive daemon/worker/Codex kill testing during a nontrivial in-progress code change;
 - host reboot plus OS service autostart;
 - Linux Native and WSL2 host matrices;

@@ -32,6 +32,7 @@ Codex process, or Desktop sidebar.
 
 - [Why Codex Harbor?](#why-codex-harbor)
 - [Architecture](#architecture)
+- [Task, session, and turn model](#task-session-and-turn-model)
 - [Features](#features)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
@@ -80,6 +81,44 @@ flowchart LR
 
 The daemon owns one shared App Server process. Workers retain task-scoped model
 and reasoning configuration, so agent state never leaks between tasks.
+
+## Task, session, and turn model
+
+Harbor does not replace Codex sessions. It schedules work into durable Codex
+threads created through App Server, so the transcript remains in Codex's own
+thread store and can be recognized in the Codex app as `[T001] Task title`.
+Harbor's dashboard adds lifecycle and quota control; it is not a second chat
+history implementation.
+
+| Harbor/Codex object | Meaning | Lifetime |
+|---|---|---|
+| Task | Business objective, repository, prompt, acceptance, dependencies, and scheduling state | Until explicitly deleted |
+| Root Thread | The task's primary Codex session and conversation history | Reused across Worker and App Server restarts |
+| Recovery Thread | A fork/new thread used only if the prior thread cannot be resumed | Linked to the same Task |
+| Turn | One prompt execution inside a Thread | Recorded with its Thread and execution number |
+| Counted failure | A runtime or acceptance failure that consumes the configured retry budget | Separate from the Turn count |
+
+The normal mapping is one Task to one Root Thread, with multiple Turns over
+time. The first Turn receives the full task envelope. Acceptance feedback and
+quota-reset recovery prompts are injected as later Turns in that same Thread.
+Quota exhaustion is recorded as `WAIT_QUOTA`; its Turn remains visible, but it
+does not increment the counted-failure budget.
+
+```mermaid
+flowchart LR
+    T[Harbor Task] --> R[Codex Root Thread]
+    R --> A[Turn 1: full task prompt]
+    A --> Q[WAIT_QUOTA]
+    Q -->|5-hour window available| B[thread/resume]
+    B --> C[Turn 2: recovery prompt]
+    C --> V[Acceptance]
+```
+
+If the daemon or App Server stops while waiting, SQLite retains the Task ↔
+Thread mapping. After restart, the scheduler waits for the persisted reset time
+and live quota availability, then calls `thread/resume` before starting the next
+Turn. It does not create a detached replacement session merely because quota
+was exhausted.
 
 ## Features
 
@@ -329,6 +368,8 @@ max_attempts: 5
 ```
 
 Lower priority numbers run first; tasks with equal priority use FIFO order.
+`max_attempts` is the counted-failure retry limit; quota-wait Turns do not
+consume it.
 
 ## CLI reference
 
@@ -402,7 +443,7 @@ integration gate.
 
 - SQLite—not chat history—is the control-plane source of truth.
 - Task state and pool state remain separate.
-- Quota exhaustion is a wait state, not a failed attempt.
+- Quota exhaustion is a wait state and recorded Turn, not a counted failure.
 - Unsupported model capabilities block a task instead of changing its model.
 - Codex authentication remains owned by Codex; Harbor does not store its secrets.
 - `task cleanup` validates the registered Git root and removes only the exact

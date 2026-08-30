@@ -26,14 +26,21 @@ def classify_error(message: str) -> ErrorType:
     lowered = message.lower()
     if any(
         token in lowered
-        for token in ("5 hour", "5-hour", "5h usage", "primary rate limit")
-    ):
-        return ErrorType.RATE_LIMIT_5H
-    if any(
-        token in lowered
         for token in ("weekly limit", "weekly quota", "secondary rate limit")
     ):
         return ErrorType.RATE_LIMIT_WEEKLY
+    if any(
+        token in lowered
+        for token in (
+            "usagelimitexceeded",
+            "hit your usage limit",
+            "5 hour",
+            "5-hour",
+            "5h usage",
+            "primary rate limit",
+        )
+    ):
+        return ErrorType.RATE_LIMIT_5H
     if any(
         token in lowered
         for token in (
@@ -142,6 +149,43 @@ class Worker:
         envelope.write(self.data_dir / "tasks" / task["id"] / "recovery.json")
         return envelope
 
+    async def _name_thread(
+        self, task: dict[str, Any], thread_id: str, *, recovery: bool = False
+    ) -> None:
+        if not isinstance(self.runtime, CodexAppServerRuntime):
+            return
+        suffix = " · Recovery" if recovery else ""
+        name = f'[{task["id"]}] {task["title"]}{suffix}'
+        try:
+            await self.runtime.client.thread_set_name(thread_id, name)
+        except Exception as error:  # noqa: BLE001 - naming is optional metadata
+            self.repository.add_event(
+                task["id"],
+                "CODEX_THREAD_NAME_FAILED",
+                {"thread_id": thread_id, "error": str(error)[-1000:]},
+            )
+
+    def _quota_resume_at(self, error_type: ErrorType) -> str:
+        quota_type = (
+            "PRIMARY_5H"
+            if error_type == ErrorType.RATE_LIMIT_5H
+            else "WEEKLY"
+        )
+        now = datetime.now(UTC)
+        for quota in self.repository.list_quotas():
+            if quota["quota_type"] != quota_type or not quota.get("reset_at"):
+                continue
+            try:
+                reset = datetime.fromisoformat(quota["reset_at"])
+                if reset.tzinfo is None:
+                    reset = reset.replace(tzinfo=UTC)
+                if reset > now:
+                    return reset.isoformat()
+            except (TypeError, ValueError):
+                pass
+        # Avoid a hot loop if account/rateLimits telemetry lags the turn error.
+        return (now + timedelta(seconds=60)).isoformat()
+
     async def _start_or_resume(
         self,
         task: dict[str, Any],
@@ -156,9 +200,16 @@ class Worker:
         if active_thread:
             prompt = build_recovery_prompt(envelope)
             try:
-                return await self.runtime.resume_task(
+                await self._name_thread(task, active_thread)
+                result = await self.runtime.resume_task(
                     active_thread, str(worktree), prompt, config
                 )
+                self.repository.add_event(
+                    task["id"],
+                    "CODEX_THREAD_RESUMED",
+                    {"thread_id": active_thread},
+                )
+                return result
             except AppServerError:
                 if isinstance(self.runtime, CodexAppServerRuntime):
                     try:
@@ -176,6 +227,7 @@ class Worker:
                             parent_thread_id=active_thread,
                             model=config.effective_model,
                         )
+                        await self._name_thread(task, fork_id, recovery=True)
                         envelope.thread_id = fork_id
                         envelope.write(
                             self.data_dir / "tasks" / task["id"] / "recovery.json"
@@ -202,6 +254,9 @@ class Worker:
             self.repository.set_thread(
                 task["id"], thread_id, role, model=config.effective_model
             )
+            await self._name_thread(
+                task, thread_id, recovery=role == ThreadRole.RECOVERY
+            )
             envelope.thread_id = thread_id
             envelope.write(self.data_dir / "tasks" / task["id"] / "recovery.json")
             return await self.runtime.start_turn(
@@ -223,33 +278,51 @@ class Worker:
         self.repository.finish_attempt(
             task["id"],
             attempt,
-            "FAILED",
+            (
+                "WAIT_QUOTA"
+                if error_type
+                in {ErrorType.RATE_LIMIT_5H, ErrorType.RATE_LIMIT_WEEKLY}
+                else "FAILED"
+            ),
             error_type=error_type,
             error_message=message[-8000:],
         )
         if error_type in {ErrorType.RATE_LIMIT_5H, ErrorType.RATE_LIMIT_WEEKLY}:
-            self.repository.discard_quota_attempt(task["id"], attempt)
+            resume_at = self._quota_resume_at(error_type)
             self.repository.transition(
-                task["id"], TaskStatus.WAIT_QUOTA, reason=error_type
+                task["id"],
+                TaskStatus.WAIT_QUOTA,
+                reason=error_type,
+                resume_at=resume_at,
             )
             self.repository.add_event(
-                task["id"], "TASK_RATE_LIMITED", {"error_type": error_type}
+                task["id"],
+                "TASK_RATE_LIMITED",
+                {
+                    "attempt": attempt,
+                    "error_type": error_type,
+                    "resume_at": resume_at,
+                },
             )
         elif error_type in {ErrorType.AUTH, ErrorType.GIT}:
             self.repository.transition(
                 task["id"], TaskStatus.BLOCKED, reason=error_type
             )
-        elif int(task["current_attempt"]) >= int(task["max_attempts"]):
-            self.repository.transition(task["id"], TaskStatus.FAILED, reason=error_type)
         else:
-            delay = min(600, 30 * (2 ** max(0, int(task["current_attempt"]))))
-            resume_at = (datetime.now(UTC) + timedelta(seconds=delay)).isoformat()
-            self.repository.transition(
-                task["id"],
-                TaskStatus.RETRY_WAIT,
-                reason=error_type,
-                resume_at=resume_at,
-            )
+            failure_count = self.repository.record_failure(task["id"])
+            if failure_count >= int(task["max_attempts"]):
+                self.repository.transition(
+                    task["id"], TaskStatus.FAILED, reason=error_type
+                )
+            else:
+                delay = min(600, 30 * (2 ** max(0, failure_count - 1)))
+                resume_at = (datetime.now(UTC) + timedelta(seconds=delay)).isoformat()
+                self.repository.transition(
+                    task["id"],
+                    TaskStatus.RETRY_WAIT,
+                    reason=error_type,
+                    resume_at=resume_at,
+                )
 
     async def run(self, task: dict[str, Any]) -> None:
         self._task_id = task["id"]
@@ -289,6 +362,7 @@ class Worker:
             )
             self.repository.set_claim_running(task["id"])
 
+            first_turn_in_worker = True
             while True:
                 self.repository.apply_pending_agent_config(task["id"])
                 task = self.repository.get_task(task["id"])
@@ -297,7 +371,7 @@ class Worker:
                     task["id"], config, task.get("root_thread_id")
                 )
                 try:
-                    if attempt == 1 or task.get("root_thread_id") is None:
+                    if first_turn_in_worker or task.get("root_thread_id") is None:
                         result = await self._start_or_resume(
                             task, config, worktree, envelope
                         )
@@ -312,8 +386,9 @@ class Worker:
                             thread_id, str(worktree), prompt, config
                         )
                     self.repository.bind_attempt_thread(
-                        task["id"], attempt, result.thread_id
+                        task["id"], attempt, result.thread_id, result.turn_id
                     )
+                    first_turn_in_worker = False
                     if result.status.lower() not in {
                         "completed",
                         "succeeded",
@@ -358,7 +433,8 @@ class Worker:
                     error_type=ErrorType.ACCEPTANCE,
                 )
                 refreshed = self.repository.get_task(task["id"])
-                if refreshed["current_attempt"] >= refreshed["max_attempts"]:
+                failure_count = self.repository.record_failure(task["id"])
+                if failure_count >= refreshed["max_attempts"]:
                     self.repository.transition(
                         task["id"], TaskStatus.FAILED, reason=ErrorType.ACCEPTANCE
                     )

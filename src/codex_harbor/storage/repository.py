@@ -165,7 +165,7 @@ class HarborRepository:
                 )
             ]
             latest_attempt = conn.execute(
-                """SELECT attempt_number, thread_id, started_at, finished_at, result,
+                """SELECT attempt_number, thread_id, turn_id, started_at, finished_at, result,
                           error_type, requested_model, requested_reasoning_effort,
                           effective_model, effective_reasoning_effort
                    FROM attempts WHERE task_id=? ORDER BY attempt_number DESC LIMIT 1""",
@@ -359,24 +359,48 @@ class HarborRepository:
                 (utc_now(), result, error_type, error_message, task_id, number),
             )
 
-    def bind_attempt_thread(self, task_id: str, number: int, thread_id: str) -> None:
-        with self.db.connect() as conn:
-            conn.execute(
-                "UPDATE attempts SET thread_id=? WHERE task_id=? AND attempt_number=?",
-                (thread_id, task_id, number),
-            )
-
-    def discard_quota_attempt(self, task_id: str, number: int) -> None:
-        """Quota is resource unavailability, not a consumed failure attempt."""
+    def bind_attempt_thread(
+        self,
+        task_id: str,
+        number: int,
+        thread_id: str,
+        turn_id: str | None = None,
+    ) -> None:
+        now = utc_now()
         with self.db.transaction(immediate=True) as conn:
             conn.execute(
-                "DELETE FROM attempts WHERE task_id=? AND attempt_number=?",
-                (task_id, number),
+                """UPDATE attempts SET thread_id=?, turn_id=?
+                   WHERE task_id=? AND attempt_number=?""",
+                (thread_id, turn_id, task_id, number),
             )
             conn.execute(
-                "UPDATE tasks SET current_attempt=MAX(0, current_attempt - 1), updated_at=? WHERE id=?",
-                (utc_now(), task_id),
+                "UPDATE codex_threads SET last_used_at=? WHERE thread_id=?",
+                (now, thread_id),
             )
+            self._event(
+                conn,
+                task_id,
+                "CODEX_TURN_RECORDED",
+                {
+                    "attempt": number,
+                    "thread_id": thread_id,
+                    "turn_id": turn_id,
+                },
+            )
+
+    def record_failure(self, task_id: str) -> int:
+        with self.db.transaction(immediate=True) as conn:
+            row = conn.execute(
+                "SELECT failure_count FROM tasks WHERE id=?", (task_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(task_id)
+            count = int(row["failure_count"]) + 1
+            conn.execute(
+                "UPDATE tasks SET failure_count=?, updated_at=? WHERE id=?",
+                (count, utc_now(), task_id),
+            )
+            return count
 
     def set_thread(
         self,
@@ -655,7 +679,12 @@ class HarborRepository:
             TaskStatus.CANCELLED,
         }:
             raise ValueError(f"task {task_id} is not retryable from {task['status']}")
-        self.transition(task_id, TaskStatus.READY)
+        with self.db.transaction(immediate=True) as conn:
+            conn.execute(
+                "UPDATE tasks SET failure_count=0, updated_at=? WHERE id=?",
+                (utc_now(), task_id),
+            )
+            self._set_status(conn, task_id, TaskStatus.READY)
         return self.get_task(task_id)
 
     def delete_task(self, task_id: str) -> None:

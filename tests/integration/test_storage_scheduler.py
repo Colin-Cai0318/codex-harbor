@@ -3,7 +3,14 @@ from pathlib import Path
 
 import pytest
 
-from codex_harbor.domain import PoolStatus, TaskSpec, TaskStatus, utc_now
+from codex_harbor.domain import (
+    EffectiveAgentConfig,
+    ErrorType,
+    PoolStatus,
+    TaskSpec,
+    TaskStatus,
+    utc_now,
+)
 from codex_harbor.scheduler import Scheduler
 from codex_harbor.storage import Database, HarborRepository
 
@@ -175,3 +182,42 @@ def test_partial_agent_change_preserves_other_field_and_can_clear_inheritance(
     assert pending["model"] == "model-a" and pending["pending_model_set"] == 1
     repository.apply_pending_agent_config("T001")
     assert repository.get_task("T001")["model"] is None
+
+
+def test_v3_migration_repairs_historical_usage_limit_failure(tmp_path, git_repo):
+    database = Database(tmp_path / "migration" / "harbor.db")
+    database.migrate(now=utc_now())
+    repository = HarborRepository(database)
+    repository.add_repository(git_repo)
+    task = add(repository, git_repo, "historical quota", task_id="T001")
+    repository.claim_next("legacy-worker")
+    repository.transition(task["id"], TaskStatus.RUNNING)
+    attempt = repository.create_attempt(
+        task["id"], EffectiveAgentConfig(None, None, "model-a", "medium")
+    )
+    repository.finish_attempt(
+        task["id"],
+        attempt,
+        "FAILED",
+        error_type=ErrorType.AGENT_FAILURE,
+        error_message=(
+            "{'message': \"You've hit your usage limit.\", "
+            "'codexErrorInfo': 'usageLimitExceeded'}"
+        ),
+    )
+    repository.record_failure(task["id"])
+    repository.transition(task["id"], TaskStatus.FAILED)
+    with database.connect() as connection:
+        connection.execute("DELETE FROM schema_version WHERE version=3")
+
+    database.migrate(now=utc_now())
+
+    repaired = repository.get_task(task["id"])
+    assert repaired["status"] == TaskStatus.WAIT_QUOTA
+    assert repaired["failure_count"] == 0
+    assert repaired["latest_attempt"]["result"] == "WAIT_QUOTA"
+    assert repaired["latest_attempt"]["error_type"] == ErrorType.RATE_LIMIT_5H
+    assert any(
+        event["event_type"] == "TASK_QUOTA_FAILURE_REPAIRED"
+        for event in repository.list_events(task["id"])
+    )

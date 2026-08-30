@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     updated_at TEXT NOT NULL,
     max_attempts INTEGER NOT NULL DEFAULT 5,
     current_attempt INTEGER NOT NULL DEFAULT 0,
+    failure_count INTEGER NOT NULL DEFAULT 0,
     root_thread_id TEXT,
     resume_at TEXT,
     blocked_reason TEXT,
@@ -62,6 +63,7 @@ CREATE TABLE IF NOT EXISTS attempts (
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     attempt_number INTEGER NOT NULL,
     thread_id TEXT,
+    turn_id TEXT,
     started_at TEXT,
     finished_at TEXT,
     result TEXT,
@@ -169,6 +171,16 @@ class Database:
                 connection.execute(
                     "ALTER TABLE tasks ADD COLUMN pending_reasoning_set INTEGER NOT NULL DEFAULT 0"
                 )
+            if "failure_count" not in task_columns:
+                connection.execute(
+                    "ALTER TABLE tasks ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0"
+                )
+            attempt_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(attempts)")
+            }
+            if "turn_id" not in attempt_columns:
+                connection.execute("ALTER TABLE attempts ADD COLUMN turn_id TEXT")
             pool_columns = {
                 row["name"]
                 for row in connection.execute("PRAGMA table_info(pool_state)")
@@ -188,6 +200,63 @@ class Database:
                 "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES(2, ?)",
                 (now,),
             )
+            version_three = connection.execute(
+                "SELECT 1 FROM schema_version WHERE version=3"
+            ).fetchone()
+            if version_three is None:
+                quota_error_match = """
+                    lower(COALESCE(error_message, '')) LIKE '%usagelimitexceeded%'
+                    OR lower(COALESCE(error_message, '')) LIKE '%hit your usage limit%'
+                """
+                repaired_tasks = [
+                    row["id"]
+                    for row in connection.execute(
+                        f"""SELECT t.id FROM tasks t
+                            JOIN attempts a ON a.task_id=t.id
+                            WHERE t.status='FAILED'
+                              AND a.attempt_number=(
+                                  SELECT MAX(last.attempt_number)
+                                  FROM attempts last WHERE last.task_id=t.id
+                              )
+                              AND ({quota_error_match})"""
+                    )
+                ]
+                connection.execute(
+                    f"""UPDATE attempts
+                        SET result='WAIT_QUOTA', error_type='RATE_LIMIT_5H'
+                        WHERE {quota_error_match}"""
+                )
+                connection.execute(
+                    """UPDATE tasks SET failure_count=(
+                           SELECT COUNT(*) FROM attempts a
+                           WHERE a.task_id=tasks.id
+                             AND a.result IN ('FAILED', 'ACCEPTANCE_FAILED')
+                             AND COALESCE(a.error_type, '') NOT IN (
+                                 'RATE_LIMIT_5H', 'RATE_LIMIT_WEEKLY'
+                             )
+                       )"""
+                )
+                for task_id in repaired_tasks:
+                    connection.execute(
+                        """UPDATE tasks SET status='WAIT_QUOTA',
+                           blocked_reason='RATE_LIMIT_5H', resume_at=NULL,
+                           claimed_by=NULL, updated_at=? WHERE id=?""",
+                        (now, task_id),
+                    )
+                    connection.execute(
+                        """INSERT INTO events(task_id, timestamp, event_type, payload)
+                           VALUES(?, ?, 'TASK_QUOTA_FAILURE_REPAIRED', ?)""",
+                        (
+                            task_id,
+                            now,
+                            '{"from":"FAILED","to":"WAIT_QUOTA",'
+                            '"reason":"usageLimitExceeded"}',
+                        ),
+                    )
+                connection.execute(
+                    "INSERT INTO schema_version(version, applied_at) VALUES(3, ?)",
+                    (now,),
+                )
             connection.execute(
                 """INSERT OR IGNORE INTO pool_state(
                     id, state, freeze_on_weekly_reset, max_workers, updated_at

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from ..codex.app_server_client import AppServerClient
@@ -78,7 +79,7 @@ class CodexAppServerRuntime(AgentRuntime):
             turn_id=turn_id,
             status=str(completed.get("status", "unknown")),
             events=[completed],
-            error=str(error) if error else None,
+            error=json.dumps(error, ensure_ascii=False) if error else None,
         )
 
     async def interrupt_task(self, thread_id: str) -> None:

@@ -273,6 +273,11 @@ class AppServerClient:
             "thread/read", {"threadId": thread_id, "includeTurns": include_turns}
         )
 
+    async def thread_set_name(self, thread_id: str, name: str) -> dict[str, Any]:
+        return await self.request(
+            "thread/name/set", {"threadId": thread_id, "name": name}
+        )
+
     async def thread_fork(
         self, thread_id: str, *, cwd: str | None = None, model: str | None = None
     ) -> dict[str, Any]:

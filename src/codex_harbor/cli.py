@@ -75,7 +75,12 @@ def _add_task_parser(task_sub: argparse._SubParsersAction) -> None:
     add.add_argument("--depends-on", action="append", default=[])
     add.add_argument("--exclusive-group")
     add.add_argument("--accept", action="append", default=[])
-    add.add_argument("--max-attempts", type=int, default=5)
+    add.add_argument(
+        "--max-attempts",
+        type=int,
+        default=5,
+        help="counted failure retry limit; quota-wait turns do not consume it",
+    )
     add.add_argument("--model")
     add.add_argument("--reasoning")
     add.add_argument("--profile")

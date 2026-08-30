@@ -31,6 +31,7 @@ SQLite 保存调度状态、使用 Git worktree 隔离代码改动，并通过�
 
 - [为什么需要 Codex Harbor？](#为什么需要-codex-harbor)
 - [系统架构](#系统架构)
+- [TaskSession 与 Turn 的关系](#tasksession-与-turn-的关系)
 - [核心能力](#核心能力)
 - [环境要求](#环境要求)
 - [快速开始](#快速开始)
@@ -79,6 +80,41 @@ flowchart LR
 
 Daemon 统一管理一个 App Server 进程。模型和推理等级配置始终归属于具体任务，
 不会通过 Worker 在任务之间泄漏全局 Agent 状态。
+
+## Task、Session 与 Turn 的关系
+
+Harbor 不会替代或绕开 Codex Session。它通过 App Server 把任务调度到持久化的
+Codex Thread 中，因此对话记录仍保存在 Codex 自己的 Thread 存储里，并会以
+`[T001] 任务标题` 这样的名称便于在 Codex 应用中识别。Harbor Dashboard 负责补充
+生命周期、并发和额度控制，并不是另一套聊天记录系统。
+
+| Harbor/Codex 对象 | 含义 | 生命周期 |
+|---|---|---|
+| Task | 业务目标、仓库、提示词、验收标准、依赖和调度状态 | 直到被显式删除 |
+| Root Thread | 任务的主要 Codex Session 和对话历史 | 跨 Worker、App Server 重启复用 |
+| Recovery Thread | 仅在原 Thread 无法恢复时 Fork 或新建 | 仍关联同一个 Task |
+| Turn | Thread 内的一次提示词执行 | 与 Thread ID、执行轮次一起记录 |
+| 计入预算的失败 | 会消耗失败重试上限的运行或验收失败 | 与 Turn 数量独立计算 |
+
+正常关系是一个 Task 对应一个 Root Thread，并在其中产生多个 Turn。第一个 Turn
+注入完整任务信封；验收反馈和额度重置后的恢复提示词会作为后续 Turn 注入同一
+Thread。额度耗尽会记录为 `WAIT_QUOTA`：这个 Turn 和错误证据会保留，但不会增加
+“计入预算的失败”数量。
+
+```mermaid
+flowchart LR
+    T[Harbor Task] --> R[Codex Root Thread]
+    R --> A[Turn 1：完整任务提示词]
+    A --> Q[WAIT_QUOTA]
+    Q -->|5 小时额度恢复| B[thread/resume]
+    B --> C[Turn 2：恢复提示词]
+    C --> V[执行验收]
+```
+
+即使 Daemon 或 App Server 在等待期间停止，SQLite 仍会保存 Task ↔ Thread 映射。
+重启后，调度器会同时等待已记录的重置时间和实时额度恢复，然后先调用
+`thread/resume`，再启动下一个 Turn；不会因为额度耗尽而创建一条脱离 Codex 的
+替代 Session。
 
 ## 核心能力
 
@@ -325,7 +361,8 @@ acceptance:
 max_attempts: 5
 ```
 
-优先级数字越小越先执行；相同优先级按 FIFO 排序。
+优先级数字越小越先执行；相同优先级按 FIFO 排序。`max_attempts` 表示计入预算的
+失败重试上限，等待额度的 Turn 不会消耗它。
 
 ## CLI 命令参考
 
@@ -392,7 +429,7 @@ CI 矩阵覆盖 Ubuntu、Windows 与 Python 3.11、3.13。确定性测试使用 
 
 - 控制平面的事实来源是 SQLite，而不是聊天历史。
 - 任务状态与资源池状态相互独立。
-- 配额耗尽属于等待状态，不计为失败 Attempt。
+- 配额耗尽属于等待状态和已记录 Turn，但不计入失败重试预算。
 - 模型能力不受支持时会阻塞任务，不会偷偷更换模型或推理等级。
 - Codex 身份认证仍由 Codex 管理；Harbor 不保存其凭据。
 - `task cleanup` 会校验已注册 Git Root，只删除指定的 Harbor worktree，并保留分支。
