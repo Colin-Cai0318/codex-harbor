@@ -1,0 +1,4 @@
+interface:
+  display_name: "Harbor Tasks"
+  short_description: "Create and control persistent Codex Harbor tasks"
+  default_prompt: "Inspect Codex Harbor and help me create or manage persistent coding tasks."

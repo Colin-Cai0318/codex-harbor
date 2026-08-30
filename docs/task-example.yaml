@@ -1,0 +1,20 @@
+id: T001
+title: Qualcomm watchdog parser
+description: |
+  Add Qualcomm watchdog automatic analysis.
+repository:
+  path: /home/user/crash-mcp
+execution:
+  backend: local
+agent:
+  model: null
+  reasoning_effort: high
+priority: 50
+depends_on: []
+exclusive_group: watchdog-parser
+prompt: |
+  Implement Qualcomm watchdog analysis.
+acceptance:
+  commands:
+    - pytest tests/watchdog -q
+max_attempts: 5

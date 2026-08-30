@@ -1,0 +1,33 @@
+[harbor]
+data_dir = ""
+bind = "127.0.0.1"
+port = 8765
+
+[scheduler]
+max_workers = 3
+poll_interval_seconds = 2.0
+heartbeat_interval_seconds = 10.0
+stale_worker_seconds = 45.0
+
+[quota]
+freeze_on_weekly_reset = true
+provider = "codex"
+
+[codex]
+executable = ""
+default_model = ""
+default_reasoning_effort = "medium"
+approval_policy = "never"
+sandbox = "workspace-write"
+
+[profiles.simple]
+reasoning_effort = "low"
+
+[profiles.normal]
+reasoning_effort = "medium"
+
+[profiles.deep_debug]
+reasoning_effort = "high"
+
+[profiles.critical_rca]
+reasoning_effort = "xhigh"
