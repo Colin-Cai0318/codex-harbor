@@ -21,7 +21,7 @@ This document maps the product specification to implemented code and verificatio
 | 12 Windows Native | executable resolution, paths, process tree, file-lock-safe SQLite | current Windows test run; remains beta |
 | 13 Local API | loopback FastAPI endpoints | HTTP integration tests |
 | 14 Dashboard | lightweight HTML dashboard consuming only Local API | HTTP render/API tests |
-| 15 Skill/plugin | API is ready for a separately installed skill/plugin | not bundled: plugin installation and UX are a separate distribution concern |
+| 15 Skill/plugin | Development plugin and `harbor-tasks` skill under `integrations/plugins/codex-harbor` | plugin/skill validation plus loopback API helper smoke test |
 
 ## Important implementation choices
 
