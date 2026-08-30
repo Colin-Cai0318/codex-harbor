@@ -34,6 +34,7 @@ SQLite 保存调度状态、使用 Git worktree 隔离代码改动，并通过�
 - [核心能力](#核心能力)
 - [环境要求](#环境要求)
 - [快速开始](#快速开始)
+- [注册本地仓库](#注册本地仓库)
 - [配置说明](#配置说明)
 - [YAML 任务文件](#yaml-任务文件)
 - [CLI 命令参考](#cli-命令参考)
@@ -135,18 +136,22 @@ uv run harbor doctor
 
 ### 3. 注册仓库并创建任务
 
-Harbor 只会操作显式注册过的 Git 仓库。
+Harbor 注册的是已经 clone 到本机的 Git 工作区路径，不是 GitHub URL。以
+`F:\BossHunter` 为例：
 
 ```powershell
-uv run harbor repo add E:\path\to\project
+uv run harbor repo add "F:\BossHunter"
 
 uv run harbor task add `
-  --repo E:\path\to\project `
-  --title "新增解析器" `
-  --prompt "实现解析器并保持现有行为不变" `
+  --repo "F:\BossHunter" `
+  --title "完善 BossHunter 使用文档" `
+  --prompt "检查现有 README，补充安装、启动和验证步骤；不要修改业务代码" `
+  --backend windows `
   --reasoning high `
-  --accept "pytest -q"
+  --accept "git diff --check"
 ```
+
+如果这里仍不清楚，请继续阅读下面的[注册本地仓库](#注册本地仓库)。
 
 ### 4. 启动 Harbor
 
@@ -162,6 +167,110 @@ uv run harbor ps
 uv run harbor task show T001
 uv run harbor history T001
 ```
+
+## 注册本地仓库
+
+### “本地路径”和“GitHub 地址”分别有什么作用？
+
+Harbor 当前只接受本地路径。GitHub 地址用于 `git clone`、`pull` 和 `push`，
+不能直接传给 `harbor repo add`。
+
+| 信息 | BossHunter 示例 | Harbor 是否直接使用 |
+|---|---|---|
+| 本地 Git 工作区 | `F:\BossHunter` | 是，注册和创建任务时都传这个路径 |
+| GitHub 仓库 | [`Colin-Cai0318/BossHunter`](https://github.com/Colin-Cai0318/BossHunter) | 否，由本地 Git remote 管理 |
+| Harbor 数据库 | 默认位于 `%LOCALAPPDATA%\CodexHarbor\harbor.db` | 是，保存注册信息和任务状态 |
+
+`repo add` 不会下载代码。如果本地目录还不存在，需要先 clone：
+
+```powershell
+git clone https://github.com/Colin-Cai0318/BossHunter "F:\BossHunter"
+```
+
+你的目录已经存在时，不要重复 clone，直接执行后面的注册命令。
+
+### 第一步：确认路径是可用的 Git 仓库
+
+```powershell
+Test-Path -LiteralPath "F:\BossHunter"
+git -C "F:\BossHunter" rev-parse --show-toplevel
+git -C "F:\BossHunter" rev-parse --verify HEAD
+git -C "F:\BossHunter" remote -v
+```
+
+预期结果：第一条输出 `True`，第二条输出 `F:/BossHunter`，第三条能解析出
+提交 ID。remote 可以叫 `origin`、`fork` 或其他名字，Harbor 不依赖 remote
+名称。
+
+> [!WARNING]
+> Harbor 为任务创建的 worktree 基于仓库当前已提交的 `HEAD`。源工作区中的
+> 未提交和未跟踪文件不会自动复制进任务 worktree；需要让任务看到的改动应先
+> 正确提交，或者在任务 prompt 中明确安排其他安全的准备方式。
+
+### 第二步：在 Codex Harbor 目录中注册
+
+```powershell
+cd "E:\Tools\Codex_Harbor"
+uv run harbor repo add "F:\BossHunter"
+```
+
+成功时会输出类似内容：
+
+```json
+{
+  "path": "F:\\BossHunter",
+  "name": "BossHunter",
+  "added_at": "2026-08-30T09:00:00+00:00"
+}
+```
+
+重复执行是安全的：同一路径会更新现有注册记录，不会复制仓库，也不会修改
+BossHunter 源工作区。注册命令不要求 daemon 已经启动。
+
+### 第三步：确认注册结果
+
+```powershell
+uv run harbor repo list
+```
+
+输出中应包含 `F:\\BossHunter`。如果 Dashboard 已经打开，请刷新浏览器；之后
+“新建任务”对话框的“仓库”下拉框中会出现 `BossHunter — F:\BossHunter`。
+
+### 第四步：创建一个 BossHunter 示例任务
+
+```powershell
+uv run harbor task add `
+  --repo "F:\BossHunter" `
+  --title "完善 BossHunter 使用文档" `
+  --prompt "检查现有 README，补充安装、启动和验证步骤；不要修改业务代码。完成后总结改动。" `
+  --backend windows `
+  --reasoning high `
+  --accept "git diff --check"
+```
+
+命令只会把任务写入 Harbor 数据库。要实际执行任务，还需要启动调度器：
+
+```powershell
+uv run harbor daemon
+```
+
+浏览器打开 <http://127.0.0.1:8765>，或用以下命令确认任务状态：
+
+```powershell
+uv run harbor task list
+uv run harbor ps
+```
+
+### 常见问题
+
+| 现象 | 原因和处理 |
+|---|---|
+| `repository does not exist` | 本地路径不存在；检查盘符、目录名，并在包含空格时使用双引号 |
+| `repository is not registered` | 创建任务使用了另一条路径，或命令连接了不同的数据目录；重新执行 `repo add` 并检查 `repo list` |
+| `repo list` 仍是空数组 | CLI 与 daemon 可能使用了不同的 `HARBOR_DATA_DIR` 或 `--config`；两边必须使用同一配置 |
+| GitHub URL 无法注册 | 这是预期行为；先 clone，再注册本地目录 |
+| 任务中看不到本地未提交改动 | worktree 从已提交的 `HEAD` 创建；先处理并提交需要纳入任务的改动 |
+| Dashboard 下拉框没有新仓库 | 刷新页面；仓库选项在页面载入时读取 |
 
 ## 配置说明
 

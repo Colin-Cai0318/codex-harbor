@@ -35,6 +35,7 @@ Codex process, or Desktop sidebar.
 - [Features](#features)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
+- [Register a local repository](#register-a-local-repository)
 - [Configuration](#configuration)
 - [Task files](#task-files)
 - [CLI reference](#cli-reference)
@@ -141,21 +142,22 @@ uv run harbor doctor
 
 ### 3. Register a repository and create a task
 
-Harbor only operates on explicitly registered Git repositories.
+Harbor registers an existing local Git checkout, not a GitHub URL. For example:
 
-```bash
-uv run harbor repo add /path/to/project
+```powershell
+uv run harbor repo add "F:\BossHunter"
 
-uv run harbor task add \
-  --repo /path/to/project \
-  --title "Add parser" \
-  --prompt "Implement the parser and preserve existing behavior" \
-  --reasoning high \
-  --accept "pytest -q"
+uv run harbor task add `
+  --repo "F:\BossHunter" `
+  --title "Improve BossHunter documentation" `
+  --prompt "Document installation, startup, and verification without changing application code" `
+  --backend windows `
+  --reasoning high `
+  --accept "git diff --check"
 ```
 
-PowerShell users can place the command on one line or use the backtick as the
-line-continuation character.
+See [Register a local repository](#register-a-local-repository) for the full
+path/remote distinction, validation commands, expected output, and troubleshooting.
 
 ### 4. Start Harbor
 
@@ -171,6 +173,107 @@ uv run harbor ps
 uv run harbor task show T001
 uv run harbor history T001
 ```
+
+## Register a local repository
+
+### Local path versus GitHub URL
+
+Harbor currently accepts a local path only. A GitHub URL is managed by Git for
+clone, pull, and push operations; it is not passed to `harbor repo add`.
+
+| Value | BossHunter example | Used directly by Harbor |
+|---|---|---|
+| Local Git checkout | `F:\BossHunter` | Yes, for registration and task creation |
+| GitHub repository | [`Colin-Cai0318/BossHunter`](https://github.com/Colin-Cai0318/BossHunter) | No, it remains a Git remote |
+| Harbor database | `%LOCALAPPDATA%\CodexHarbor\harbor.db` by default | Yes, it stores registrations and task state |
+
+`repo add` does not clone a repository. If the local checkout does not exist,
+clone it first:
+
+```powershell
+git clone https://github.com/Colin-Cai0318/BossHunter "F:\BossHunter"
+```
+
+### 1. Validate the local checkout
+
+```powershell
+Test-Path -LiteralPath "F:\BossHunter"
+git -C "F:\BossHunter" rev-parse --show-toplevel
+git -C "F:\BossHunter" rev-parse --verify HEAD
+git -C "F:\BossHunter" remote -v
+```
+
+The first command should print `True`, the second should identify
+`F:/BossHunter`, and the third should resolve a commit. The remote can be named
+`origin`, `fork`, or anything else; Harbor does not depend on the remote name.
+
+> [!WARNING]
+> A Harbor task worktree starts from the repository's committed `HEAD`.
+> Uncommitted and untracked files in the source checkout are not copied into the
+> task worktree automatically.
+
+### 2. Register it from the Codex Harbor checkout
+
+```powershell
+cd "E:\Tools\Codex_Harbor"
+uv run harbor repo add "F:\BossHunter"
+```
+
+Successful output resembles:
+
+```json
+{
+  "path": "F:\\BossHunter",
+  "name": "BossHunter",
+  "added_at": "2026-08-30T09:00:00+00:00"
+}
+```
+
+Repeating the command is safe: it updates the registration for the same path;
+it does not copy or modify the source checkout. The daemon does not need to be
+running for registration.
+
+### 3. Verify registration
+
+```powershell
+uv run harbor repo list
+```
+
+The output should contain `F:\\BossHunter`. If the dashboard is already open,
+refresh it. The Create Task repository selector will then show
+`BossHunter — F:\BossHunter`.
+
+### 4. Create and run an example task
+
+```powershell
+uv run harbor task add `
+  --repo "F:\BossHunter" `
+  --title "Improve BossHunter documentation" `
+  --prompt "Document installation, startup, and verification without changing application code. Summarize the result." `
+  --backend windows `
+  --reasoning high `
+  --accept "git diff --check"
+
+uv run harbor daemon
+```
+
+Open <http://127.0.0.1:8765>, or inspect the task from another terminal:
+
+```powershell
+uv run harbor task list
+uv run harbor ps
+```
+
+### Troubleshooting
+
+| Symptom | Cause and resolution |
+|---|---|
+| `repository does not exist` | The local path is wrong; verify the drive and directory, and quote paths containing spaces |
+| `repository is not registered` | The task uses another path or another Harbor data directory; rerun `repo add` and inspect `repo list` |
+| `repo list` is still empty | The CLI and daemon may use different `HARBOR_DATA_DIR` or `--config` values; both must use the same configuration |
+| A GitHub URL cannot be registered | This is expected; clone it and register the resulting local directory |
+| Local uncommitted changes are missing | Worktrees start from committed `HEAD`; commit the changes that the task must see |
+| The dashboard selector has no new repository | Refresh the page; repository options load when the page starts |
 
 ## Configuration
 
