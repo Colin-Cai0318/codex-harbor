@@ -11,9 +11,9 @@ This document maps the product specification to implemented code and verificatio
 | 2 Codex runtime | v2 handshake and thread/turn/model methods | mocked protocol tests plus Phase 0 |
 | 3 Single worker | transactional claim, heartbeat, attempts, logs/events, runtime-adjustable persisted parallelism | worker and persistence integration tests |
 | 4 Recovery | envelope, stale worker, resume/fork/recovery-thread flow; every newly claimed Worker resumes its durable Thread before starting a Turn | recovery and quota-resume integration tests |
-| 5 Fake quota | injectable `FakeQuotaProvider` | quota transition tests |
-| 6 Real quota | `account/rateLimits/read` structured provider | live `doctor`/daemon, schema-grounded parsing |
-| 7 Weekly freeze | window identity comparison, draining generation, grandfathered set | pool controller tests |
+| 5 Fake quota | injectable `FakeQuotaProvider` | full Scheduler simulation of five-hour wait/release on a Luna task |
+| 6 Real quota | `account/rateLimits/read` structured provider | deterministic structured-response tests plus live `doctor`/daemon parsing |
+| 7 Weekly freeze | window identity comparison, draining generation, grandfathered set | full Scheduler simulation of weekly drain, automatic freeze, manual resume, and queued Luna execution |
 | 8 Model/reasoning | live registry, profiles, overrides, pending next-turn values, attempt audit | registry and worker tests |
 | 9 Dependency/workspace | dependency gate, terminal failure propagation, priority/FIFO, automatic same-workspace serialization, existing Project workspaces, and opt-in per-task Git worktrees | real temporary Git repositories and shared-workspace integration tests |
 | 10 Acceptance | command runner, timeout, output capture, follow-up turn | acceptance and worker tests |

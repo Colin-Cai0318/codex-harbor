@@ -1,6 +1,6 @@
 # Validation record
 
-Date: 2026-08-30
+Date: 2026-08-30 (updated 2026-08-31)
 Host: Windows Native
 Codex CLI: 0.149.1
 Python: CPython 3.14.6 (local validation)
@@ -13,7 +13,85 @@ Command:
 uv run pytest -q
 ```
 
-Result: 34 passed, 68% statement coverage (83 dependency deprecation warnings). The suite covers state transitions, dependency release and terminal-failure propagation, transactional admission behavior, priority, exclusive groups, persisted runtime parallelism, weekly drain/freeze semantics, model capability rejection, pending agent configuration, secret sanitization, HTTP API/dashboard rendering, emitted JavaScript syntax, Project-filtered conversation listing, durable new-conversation creation, runtime workspace roots, exact conversation-cwd preservation, raw first-message injection into an existing conversation, schema-v5 persistence, real temporary Git worktrees, existing Project workspace reuse, shared-session prompt injection, Task↔Thread many-to-many links, atomic YAML task-group import, Acceptance Runner behavior, Worker thread/turn/envelope persistence, quota wait/resume on the same Thread, historical quota-failure migration, and successful/blocked outcomes.
+Result: 39 passed, 70% statement coverage (119 dependency deprecation warnings on Python 3.14). The suite covers state transitions, dependency release and terminal-failure propagation, transactional admission behavior, priority, exclusive groups, persisted runtime parallelism, weekly drain/freeze/resume semantics, structured Codex quota parsing, model capability rejection, pending agent configuration, secret sanitization, HTTP API/dashboard rendering, emitted JavaScript syntax, Project-filtered conversation listing, durable new-conversation creation, runtime workspace roots, exact conversation-cwd preservation, raw first-message injection into an existing conversation, schema-v5 persistence, real temporary Git worktrees, existing Project workspace reuse, shared-session prompt injection, Task↔Thread many-to-many links, atomic YAML task-group import, Acceptance Runner behavior, Worker thread/turn/envelope persistence, quota wait/resume on the same Thread, historical quota-failure migration, and successful/blocked outcomes.
+
+## Simulated quota lifecycle (2026-08-31)
+
+The quota tests use an isolated temporary SQLite database, `FakeQuotaProvider`,
+and tasks explicitly configured with `gpt-5.6-luna`/`low`. They do not edit the
+live account windows or consume model quota.
+
+### Five-hour reset
+
+1. A Luna task was linked to `thread-before-limit`, moved to `WAIT_QUOTA` with
+   `RATE_LIMIT_5H`, and given an elapsed `resume_at`.
+2. While the primary five-hour window remained unavailable, a real
+   `Scheduler.tick()` left it in `WAIT_QUOTA` and started no Worker.
+3. The provider was advanced to a new available window. The next scheduler tick
+   changed `WAIT_QUOTA → READY`, claimed the task, and completed it.
+4. The Root Thread remained `thread-before-limit`; `failure_count` remained 0;
+   the completing Worker observed requested model `gpt-5.6-luna`.
+
+The existing Worker regression was also changed to Luna/low. It retains the
+real `usageLimitExceeded` fixture, records two Attempts, and proves that a new
+Worker calls `thread/resume` on the same `thread-quota` after availability
+returns. Both Attempts retain effective model `gpt-5.6-luna` and reasoning
+`low`.
+
+### Weekly reset, automatic freeze, and manual resume
+
+1. The simulated weekly boundary was crossed while T001 was `RUNNING` and T002
+   was `READY`. The scheduler changed the pool to `DRAINING`, marked only T001
+   as grandfathered, and did not start T002.
+2. After T001 reached `SUCCEEDED`, the next tick emitted `POOL_FROZEN` and set
+   the pool to `FROZEN`; T002 remained `READY` and unclaimed.
+3. A manual pool resume emitted `POOL_RESUMED`. The following tick claimed and
+   completed T002 with `gpt-5.6-luna`, while the pool remained `RUNNING`.
+
+The persisted event set contains `WEEKLY_WINDOW_CHANGED`, `POOL_DRAINING`,
+`POOL_FROZEN`, and `POOL_RESUMED`.
+
+### Structured provider coverage
+
+Deterministic provider tests now cover primary-window exhaustion, weekly
+remaining calculation, reset epoch conversion, `rateLimitReachedType`, global
+spend-control blocking, absent reset timestamps, and targeted Fake-provider
+exhaustion. `quota/manager.py` is 94% covered and `quota/provider.py` is 96%
+covered.
+
+## Real Luna smoke task
+
+Live task T005 created a new Codex-visible conversation in the existing Codex
+Harbor Project and used requested/effective model `gpt-5.6-luna` with reasoning
+`low`. Its Root Thread is `01a054d0-d6d5-7a31-8bfd-cfc82ba3ee3c`.
+
+The first Turn completed but did not satisfy the exact-file acceptance command,
+so Harbor recorded `ACCEPTANCE_FAILED` and automatically injected a follow-up
+Turn into the same Thread. The second Turn created the expected CRLF-terminated
+file, both acceptance commands passed, and T005 ended `SUCCEEDED` with two
+Attempts and one counted acceptance failure. This is a live confirmation of
+same-Thread acceptance recovery, not a claim that a real quota reset occurred.
+
+## Remaining coverage gaps
+
+The suite moved from 68% to 70%. The remaining uncovered statements are
+concentrated in process/error paths rather than the quota lifecycle tested here:
+
+| Area | Coverage | Important missing tests |
+|---|---:|---|
+| Codex App Server client and runtime adapter | 36% / 33% | malformed JSON-RPC, stdio shutdown, notification timeout, approval request denial, fork failure, interrupt failure, and live protocol error variants |
+| Daemon lifecycle | 37% | bind/start failure, signal shutdown, scheduler/API coordinated teardown, and partial initialization failure |
+| Recovery Manager and Worker | 32% / 61% | stale PID recovery, resume-then-fork fallback, recovery-thread failure, cancellation during a Turn, auth/Git/network terminal branches, and exhausting acceptance retries |
+| CLI and Local API | 48% / 79% | most CLI import/control/error-output branches; invalid Project/thread/workspace combinations and App Server unavailable responses |
+| Execution backends | 47% | command timeout, process-tree termination, WSL launch/path behavior, and unsupported-host branches |
+| Scheduler | 77% | Worker crash reaping, cancellation interrupt failure, quota-provider exceptions, retry-delay release, and `run_forever`/`stop` lifecycle |
+| Git worktree manager | 76% | conflicting/missing worktrees, Git command failures, ownership-safe cleanup rejection, and locked-file behavior |
+| Storage/config | 85% / 84% | rollback/error branches, older partial-schema combinations, malformed config, and high-contention SQLite claims |
+
+`__main__.py` reports 0%, but it is only the four-line CLI entry point and is not
+a material risk. Live `doctor`, daemon, Edge, and App Server smoke proofs exercise
+some paths that coverage.py cannot attribute because they run in separate
+processes.
 
 ## Codex Project and existing workspace integration
 
@@ -46,8 +124,8 @@ The persisted task rows have `direct_prompt=1`; T003 also has
 observation).
 
 The fixture remains Git-ignored for inspection. Its source commit is unchanged;
-only `result.txt` and `no-acceptance.txt` are untracked test outputs. The daemon
-was shut down cleanly after recording the results.
+the named proof files are untracked test outputs. The daemon was shut down
+cleanly after recording the results.
 
 ## Real 5-hour limit incident and repair
 

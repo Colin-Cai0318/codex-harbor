@@ -106,7 +106,18 @@ MODELS = [
             {"reasoningEffort": "medium", "description": ""},
             {"reasoningEffort": "high", "description": ""},
         ],
-    }
+    },
+    {
+        "model": "gpt-5.6-luna",
+        "displayName": "GPT-5.6 Luna",
+        "isDefault": False,
+        "defaultReasoningEffort": "medium",
+        "supportedReasoningEfforts": [
+            {"reasoningEffort": "low", "description": ""},
+            {"reasoningEffort": "medium", "description": ""},
+            {"reasoningEffort": "high", "description": ""},
+        ],
+    },
 ]
 
 
@@ -223,6 +234,8 @@ async def test_quota_turn_is_preserved_and_new_worker_resumes_same_thread(
             repository=str(git_repo),
             prompt="Continue after quota reset",
             acceptance_commands=["git status --short"],
+            model="gpt-5.6-luna",
+            reasoning_effort="low",
         )
     )
     reset_at = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
@@ -305,6 +318,8 @@ async def test_quota_turn_is_preserved_and_new_worker_resumes_same_thread(
         "turn-resumed",
     ]
     assert {item["thread_id"] for item in attempts} == {"thread-quota"}
+    assert {item["effective_model"] for item in attempts} == {"gpt-5.6-luna"}
+    assert {item["effective_reasoning_effort"] for item in attempts} == {"low"}
 
 
 @pytest.mark.asyncio
