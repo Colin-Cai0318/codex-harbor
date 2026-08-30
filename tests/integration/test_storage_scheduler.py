@@ -9,6 +9,7 @@ from codex_harbor.domain import (
     PoolStatus,
     TaskSpec,
     TaskStatus,
+    WorkspaceMode,
     utc_now,
 )
 from codex_harbor.scheduler import Scheduler
@@ -38,7 +39,13 @@ async def test_scheduler_observes_runtime_max_workers(
     repository, git_repo, config_values, tmp_path, monkeypatch
 ):
     for index in range(3):
-        add(repository, git_repo, f"parallel-{index}", task_id=f"T00{index + 1}")
+        add(
+            repository,
+            git_repo,
+            f"parallel-{index}",
+            task_id=f"T00{index + 1}",
+            workspace_mode=WorkspaceMode.ISOLATED,
+        )
 
     class BlockingWorker:
         def __init__(self, *args, **kwargs):
@@ -221,3 +228,34 @@ def test_v3_migration_repairs_historical_usage_limit_failure(tmp_path, git_repo)
         event["event_type"] == "TASK_QUOTA_FAILURE_REPAIRED"
         for event in repository.list_events(task["id"])
     )
+
+
+def test_terminal_dependency_blocks_following_task_and_retry_reopens_chain(
+    repository, git_repo
+):
+    first = add(repository, git_repo, "first", task_id="T001")
+    second = add(
+        repository,
+        git_repo,
+        "second",
+        task_id="T002",
+        depends_on=[first["id"]],
+    )
+    repository.claim_next("worker-first")
+    repository.transition(first["id"], TaskStatus.RUNNING)
+    repository.transition(first["id"], TaskStatus.FAILED)
+
+    assert repository.refresh_dependencies() == 1
+    blocked = repository.get_task(second["id"])
+    assert blocked["status"] == TaskStatus.BLOCKED
+    assert blocked["blocked_reason"] == "UPSTREAM_FAILED:T001"
+    assert repository.claim_next("must-not-run") is None
+
+    repository.retry_task(first["id"])
+    assert repository.refresh_dependencies() == 1
+    assert repository.get_task(second["id"])["status"] == TaskStatus.WAIT_DEP
+    repository.claim_next("worker-retry")
+    repository.transition(first["id"], TaskStatus.RUNNING)
+    repository.transition(first["id"], TaskStatus.SUCCEEDED)
+    assert repository.refresh_dependencies() == 1
+    assert repository.get_task(second["id"])["status"] == TaskStatus.READY

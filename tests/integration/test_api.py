@@ -77,3 +77,30 @@ def test_dashboard_javascript_is_valid(repository):
         timeout=15,
     )
     assert checked.returncode == 0, checked.stderr
+
+
+def test_shared_task_group_api(repository, git_repo):
+    client = TestClient(create_app(repository))
+    response = client.post(
+        "/api/task-groups",
+        json={
+            "title": "shared database work",
+            "repository": str(git_repo),
+            "session_mode": "shared",
+            "workspace_mode": "project",
+            "origin_thread_id": "origin-thread",
+            "tasks": [
+                {"title": "schema", "prompt": "Create schema", "priority": 10},
+                {"title": "follow-up", "prompt": "Improve schema", "priority": 20},
+            ],
+        },
+    )
+    assert response.status_code == 201, response.text
+    group = response.json()
+    assert group["session_mode"] == "shared"
+    assert len(group["tasks"]) == 2
+    first, second = group["tasks"]
+    assert second["depends_on"] == [first["id"]]
+    assert second["session_parent_task_id"] == first["id"]
+    assert second["workspace_mode"] == "inherit"
+    assert client.get(f"/api/task-groups/{group['id']}").status_code == 200

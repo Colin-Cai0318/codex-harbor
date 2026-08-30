@@ -13,7 +13,15 @@ Command:
 uv run pytest -q
 ```
 
-Result: 25 passed. The suite covers state transitions, dependency release, transactional admission behavior, priority, exclusive groups, persisted runtime parallelism, weekly drain/freeze semantics, model capability rejection, pending agent configuration, secret sanitization, HTTP API/dashboard rendering, JavaScript syntax validation, real temporary Git worktrees, Acceptance Runner behavior, Worker thread/turn/envelope persistence, quota wait/resume on the same Thread, historical quota-failure migration, and successful/blocked outcomes.
+Result: 30 passed, with 67% statement coverage. The suite covers state transitions, dependency release and terminal-failure propagation, transactional admission behavior, priority, exclusive groups, persisted runtime parallelism, weekly drain/freeze semantics, model capability rejection, pending agent configuration, secret sanitization, HTTP API/dashboard rendering, JavaScript syntax validation, real temporary Git worktrees, existing Project workspace reuse, shared-session prompt injection, Task↔Thread many-to-many links, atomic YAML task-group import, Acceptance Runner behavior, Worker thread/turn/envelope persistence, quota wait/resume on the same Thread, historical quota-failure migration, and successful/blocked outcomes.
+
+## Codex Project and existing workspace integration
+
+The current Codex CLI generated protocol schema was inspected locally. It defines durable Project APIs, `thread/start.projectId`, `thread/start.runtimeWorkspaceRoots`, `thread/metadata/update.projectId`, and project-filtered `thread/list`. The current App Server returned an existing `Codex Harbor` Project whose root is exactly `E:\Tools\Codex_Harbor`.
+
+Without starting a Turn, live `thread/metadata/update` calls assigned both the current development conversation and the historical T001 Thread to that existing Project. A project-filtered `thread/list` returned both IDs with the expected `projectId`; the current conversation retained cwd `E:\Tools\Codex_Harbor`. The historical T001 retained its old `C:\Users\19443\AppData\Local\CodexHarbor\worktrees\T001` cwd instead of being moved, protecting any legacy task state. New deterministic Worker coverage proves that two shared-session Tasks use one Thread, both operate in the registered existing workspace, inject the second prompt with prior-task context, and create no task worktree directories.
+
+The user's live v2 database was opened read-only and copied through SQLite's online backup API into a process-scoped temporary directory. Migrating that copy produced schema versions 1–4, retained T001's Root Thread link, populated `task_thread_links`, and marked its historical worktree as legacy Harbor-owned. The temporary backup was removed automatically; the live database was not migrated during this validation because no daemon was running and starting one would change task state.
 
 ## Real 5-hour limit incident and repair
 

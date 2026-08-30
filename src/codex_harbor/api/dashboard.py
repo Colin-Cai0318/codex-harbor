@@ -236,6 +236,7 @@ DASHBOARD = r"""<!doctype html>
     .modal-body { padding: 20px 21px 22px; }
     .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
     .field { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; }
+    .switch-row { min-height: 39px; display: flex; align-items: center; gap: 9px; color: var(--text); }
     .field.wide { grid-column: 1 / -1; }
     .form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin-top: 18px; }
     .form-message { margin-right: auto; color: var(--muted); font-size: 12px; }
@@ -341,6 +342,11 @@ DASHBOARD = r"""<!doctype html>
         <label class="field"><span data-i18n="fields.model">Model</span><select id="modelSelect" name="model"><option value="">Inherit default</option></select></label>
         <label class="field"><span data-i18n="fields.reasoning">Reasoning</span><select name="reasoning_effort"><option value="" data-i18n="common.inheritDefault">Inherit default</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select></label>
         <label class="field"><span data-i18n="fields.profile">Profile</span><select id="profileSelect" name="profile"><option value="">None</option></select></label>
+        <label class="field"><span data-i18n="fields.codexProject">Codex project</span><select id="projectSelect" name="codex_project_id"><option value="">Auto-match repository</option></select></label>
+        <label class="field"><span data-i18n="fields.workspaceMode">Workspace</span><select name="workspace_mode"><option value="project" data-i18n="workspace.project">Existing project workspace</option><option value="inherit" data-i18n="workspace.inherit">Inherit parent workspace</option><option value="isolated" data-i18n="workspace.isolated">New isolated worktree</option></select></label>
+        <label class="field"><span data-i18n="fields.sessionParent">Continue Session from task</span><input name="session_parent_task_id" placeholder="T001" data-i18n-placeholder="placeholders.sessionParent"></label>
+        <label class="field"><span data-i18n="fields.originThread">Origin conversation ID</span><input name="origin_thread_id" placeholder="Optional Codex Thread ID" data-i18n-placeholder="placeholders.originThread"></label>
+        <label class="field"><span data-i18n="fields.reuseWorkspace">Parent workspace</span><span class="switch-row"><input name="reuse_parent_worktree" type="checkbox" value="true"><span data-i18n="workspace.reuseParent">Reuse with shared Session</span></span></label>
         <label class="field"><span data-i18n="fields.exclusiveGroup">Exclusive group</span><input name="exclusive_group" placeholder="Optional" data-i18n-placeholder="common.optional"></label>
         <label class="field wide"><span data-i18n="fields.dependencies">Dependencies</span><input name="depends_on" placeholder="T001, T002"></label>
         <label class="field wide"><span data-i18n="fields.description">Description</span><textarea name="description" placeholder="Useful context for operators" data-i18n-placeholder="placeholders.description"></textarea></label>
@@ -373,10 +379,10 @@ DASHBOARD = r"""<!doctype html>
         'pool.freezeOnReset':'Freeze on weekly reset', 'pool.draining':'Weekly reset detected. {count} grandfathered {tasks} may continue; new tasks will not start.', 'pool.frozen':'Harbor is frozen after the weekly drain. {count} {tasks} remain queued until manual resume.', 'pool.paused':'Scheduling is paused. Running tasks may finish, but no new task will start.',
         'actions.pause':'Pause', 'actions.freeze':'Freeze', 'actions.resume':'Resume', 'actions.close':'Close', 'actions.cancel':'Cancel', 'actions.createTask':'Create task', 'actions.saveNextTurn':'Save for next turn', 'actions.copyWorktree':'Copy worktree', 'actions.copyThread':'Copy thread ID', 'actions.retry':'Retry', 'actions.cancelTask':'Cancel task',
         'create.title':'Create Harbor task', 'create.repoHint':'The repository must already be registered.',
-        'fields.title':'Title', 'fields.repository':'Repository', 'fields.backend':'Execution backend', 'fields.priority':'Priority', 'fields.maxAttempts':'Failure retry limit', 'fields.model':'Model', 'fields.reasoning':'Reasoning', 'fields.profile':'Profile', 'fields.exclusiveGroup':'Exclusive group', 'fields.dependencies':'Dependencies', 'fields.description':'Description', 'fields.prompt':'Prompt', 'fields.acceptanceCommands':'Acceptance commands',
-        'placeholders.taskTitle':'A concrete task title', 'placeholders.description':'Useful context for operators', 'placeholders.prompt':'Objective, constraints, and expected outcome', 'placeholders.acceptance':'One command per line',
-        'backend.local':'Local', 'common.inheritDefault':'Inherit default', 'common.optional':'Optional', 'common.none':'None', 'common.default':'default', 'common.noCommands':'No commands configured', 'common.noEvents':'No events recorded',
-        'detail.agentConfiguration':'Agent configuration', 'detail.acceptance':'Acceptance', 'detail.recentEvents':'Recent events', 'detail.status':'Status', 'detail.priority':'Priority', 'detail.requestedAgent':'Requested agent', 'detail.effectiveAgent':'Effective agent', 'detail.pendingAgent':'Pending agent', 'detail.turn':'Execution turns', 'detail.failures':'Counted failures', 'detail.latestTurn':'Latest Codex turn', 'detail.worker':'Worker', 'detail.dependencies':'Dependencies', 'detail.rootThread':'Root thread', 'detail.activeThread':'Active thread', 'detail.worktree':'Worktree', 'detail.blockedReason':'Blocked reason',
+        'fields.title':'Title', 'fields.repository':'Repository', 'fields.backend':'Execution backend', 'fields.priority':'Priority', 'fields.maxAttempts':'Failure retry limit', 'fields.model':'Model', 'fields.reasoning':'Reasoning', 'fields.profile':'Profile', 'fields.codexProject':'Codex project', 'fields.workspaceMode':'Workspace', 'fields.sessionParent':'Continue Session from task', 'fields.originThread':'Origin conversation ID', 'fields.reuseWorkspace':'Parent workspace', 'fields.exclusiveGroup':'Exclusive group', 'fields.dependencies':'Dependencies', 'fields.description':'Description', 'fields.prompt':'Prompt', 'fields.acceptanceCommands':'Acceptance commands',
+        'placeholders.taskTitle':'A concrete task title', 'placeholders.description':'Useful context for operators', 'placeholders.prompt':'Objective, constraints, and expected outcome', 'placeholders.acceptance':'One command per line', 'placeholders.sessionParent':'For example T001', 'placeholders.originThread':'Optional Codex Thread ID',
+        'backend.local':'Local', 'workspace.project':'Existing project workspace', 'workspace.inherit':'Inherit parent workspace', 'workspace.isolated':'New isolated worktree', 'workspace.reuseParent':'Reuse with shared Session', 'project.auto':'Auto-match repository', 'common.inheritDefault':'Inherit default', 'common.optional':'Optional', 'common.none':'None', 'common.default':'default', 'common.noCommands':'No commands configured', 'common.noEvents':'No events recorded',
+        'detail.agentConfiguration':'Agent configuration', 'detail.acceptance':'Acceptance', 'detail.recentEvents':'Recent events', 'detail.status':'Status', 'detail.priority':'Priority', 'detail.requestedAgent':'Requested agent', 'detail.effectiveAgent':'Effective agent', 'detail.pendingAgent':'Pending agent', 'detail.turn':'Execution turns', 'detail.failures':'Counted failures', 'detail.latestTurn':'Latest Codex turn', 'detail.worker':'Worker', 'detail.dependencies':'Dependencies', 'detail.taskGroup':'Task group', 'detail.codexProject':'Codex project', 'detail.sessionParent':'Session parent', 'detail.workspaceMode':'Workspace mode', 'detail.rootThread':'Root thread', 'detail.activeThread':'Active thread', 'detail.worktree':'Worktree', 'detail.blockedReason':'Blocked reason',
         'runtime.idle':'Idle', 'runtime.active':'{count} active', 'runtime.connecting':'Connecting…', 'runtime.updated':'Updated {time}', 'runtime.disconnected':'Disconnected', 'runtime.apiUnavailable':'Harbor API unavailable: {message}',
         'options.registerRepo':'Register a repository with harbor repo add', 'options.defaultMarker':'default',
         'messages.creating':'Creating…', 'messages.saved':'Saved', 'messages.copied':'{label} copied', 'messages.copyFailed':'Copy failed: {value}', 'messages.worktreePath':'Worktree path', 'messages.threadId':'Thread ID',
@@ -394,10 +400,10 @@ DASHBOARD = r"""<!doctype html>
         'pool.freezeOnReset':'周额度重置后冻结', 'pool.draining':'检测到周额度重置。{count} 个存量任务可继续执行；新任务暂不启动。', 'pool.frozen':'周额度排空后 Harbor 已冻结。仍有 {count} 个任务排队，需手动恢复。', 'pool.paused':'调度已暂停。运行中的任务可以完成，但不会启动新任务。',
         'actions.pause':'暂停', 'actions.freeze':'冻结', 'actions.resume':'恢复', 'actions.close':'关闭', 'actions.cancel':'取消', 'actions.createTask':'创建任务', 'actions.saveNextTurn':'保存并在下一轮生效', 'actions.copyWorktree':'复制工作树路径', 'actions.copyThread':'复制线程 ID', 'actions.retry':'重试', 'actions.cancelTask':'取消任务',
         'create.title':'创建 Harbor 任务', 'create.repoHint':'仓库必须已经在 Harbor 中注册。',
-        'fields.title':'标题', 'fields.repository':'仓库', 'fields.backend':'执行后端', 'fields.priority':'优先级', 'fields.maxAttempts':'失败重试上限', 'fields.model':'模型', 'fields.reasoning':'推理等级', 'fields.profile':'配置模板', 'fields.exclusiveGroup':'互斥组', 'fields.dependencies':'依赖任务', 'fields.description':'说明', 'fields.prompt':'任务提示词', 'fields.acceptanceCommands':'验收命令',
-        'placeholders.taskTitle':'输入明确的任务标题', 'placeholders.description':'供管理者查看的补充信息', 'placeholders.prompt':'目标、约束和预期结果', 'placeholders.acceptance':'每行一条命令',
-        'backend.local':'本机', 'common.inheritDefault':'继承默认值', 'common.optional':'可选', 'common.none':'无', 'common.default':'默认', 'common.noCommands':'未配置验收命令', 'common.noEvents':'暂无事件记录',
-        'detail.agentConfiguration':'Agent 配置', 'detail.acceptance':'验收命令', 'detail.recentEvents':'最近事件', 'detail.status':'状态', 'detail.priority':'优先级', 'detail.requestedAgent':'请求配置', 'detail.effectiveAgent':'实际配置', 'detail.pendingAgent':'待生效配置', 'detail.turn':'执行轮次', 'detail.failures':'计入预算的失败', 'detail.latestTurn':'最近 Codex Turn', 'detail.worker':'工作进程', 'detail.dependencies':'依赖任务', 'detail.rootThread':'根线程', 'detail.activeThread':'活动线程', 'detail.worktree':'工作树', 'detail.blockedReason':'阻塞原因',
+        'fields.title':'标题', 'fields.repository':'仓库', 'fields.backend':'执行后端', 'fields.priority':'优先级', 'fields.maxAttempts':'失败重试上限', 'fields.model':'模型', 'fields.reasoning':'推理等级', 'fields.profile':'配置模板', 'fields.codexProject':'Codex 项目', 'fields.workspaceMode':'工作区', 'fields.sessionParent':'延续哪个任务的 Session', 'fields.originThread':'来源开发对话 ID', 'fields.reuseWorkspace':'父任务工作区', 'fields.exclusiveGroup':'互斥组', 'fields.dependencies':'依赖任务', 'fields.description':'说明', 'fields.prompt':'任务提示词', 'fields.acceptanceCommands':'验收命令',
+        'placeholders.taskTitle':'输入明确的任务标题', 'placeholders.description':'供管理者查看的补充信息', 'placeholders.prompt':'目标、约束和预期结果', 'placeholders.acceptance':'每行一条命令', 'placeholders.sessionParent':'例如 T001', 'placeholders.originThread':'可选 Codex Thread ID',
+        'backend.local':'本机', 'workspace.project':'使用现有项目工作区', 'workspace.inherit':'继承父任务工作区', 'workspace.isolated':'新建隔离 worktree', 'workspace.reuseParent':'与共享 Session 一起复用', 'project.auto':'按仓库自动匹配', 'common.inheritDefault':'继承默认值', 'common.optional':'可选', 'common.none':'无', 'common.default':'默认', 'common.noCommands':'未配置验收命令', 'common.noEvents':'暂无事件记录',
+        'detail.agentConfiguration':'Agent 配置', 'detail.acceptance':'验收命令', 'detail.recentEvents':'最近事件', 'detail.status':'状态', 'detail.priority':'优先级', 'detail.requestedAgent':'请求配置', 'detail.effectiveAgent':'实际配置', 'detail.pendingAgent':'待生效配置', 'detail.turn':'执行轮次', 'detail.failures':'计入预算的失败', 'detail.latestTurn':'最近 Codex Turn', 'detail.worker':'工作进程', 'detail.dependencies':'依赖任务', 'detail.taskGroup':'任务组', 'detail.codexProject':'Codex 项目', 'detail.sessionParent':'Session 父任务', 'detail.workspaceMode':'工作区模式', 'detail.rootThread':'根线程', 'detail.activeThread':'活动线程', 'detail.worktree':'工作树', 'detail.blockedReason':'阻塞原因',
         'runtime.idle':'空闲', 'runtime.active':'{count} 个活动', 'runtime.connecting':'连接中…', 'runtime.updated':'更新于 {time}', 'runtime.disconnected':'连接已断开', 'runtime.apiUnavailable':'Harbor API 不可用：{message}',
         'options.registerRepo':'请先使用 harbor repo add 注册仓库', 'options.defaultMarker':'默认',
         'messages.creating':'正在创建…', 'messages.saved':'已保存', 'messages.copied':'已复制{label}', 'messages.copyFailed':'复制失败：{value}', 'messages.worktreePath':'工作树路径', 'messages.threadId':'线程 ID',
@@ -415,7 +421,7 @@ DASHBOARD = r"""<!doctype html>
       {id:'attention', titleKey:'lane.attention', states:['BLOCKED','FAILED']},
       {id:'completed', titleKey:'lane.completed', states:['SUCCEEDED','CANCELLED']}
     ];
-    const state = {tasks:[], models:[], profiles:[], repositories:[], quotas:[], workers:[], pool:null, selectedTask:null, language:'en'};
+    const state = {tasks:[], models:[], profiles:[], projects:[], repositories:[], quotas:[], workers:[], pool:null, selectedTask:null, language:'en'};
     const byId = id => document.getElementById(id);
     const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
     const basename = path => String(path || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() || 'repository';
@@ -485,7 +491,7 @@ DASHBOARD = r"""<!doctype html>
       const filtered = state.tasks.filter(task => !query || [task.id, task.title, task.status, t(`status.${task.status}`), task.repository, task.model, task.reasoning_effort].some(value => String(value || '').toLowerCase().includes(query)));
       byId('board').innerHTML = LANES.map(lane => {
         const items = filtered.filter(task => lane.states.includes(task.status));
-        const cards = items.map(task => `<button class="task-card" type="button" data-task-id="${esc(task.id)}"><span class="card-top"><span class="task-id">${esc(task.id)}</span><span class="status-chip" data-status="${esc(task.status)}">${esc(t(`status.${task.status}`))}</span></span><span class="task-title">${esc(task.title)}</span><span class="card-meta"><span class="meta-tag">${esc(taskAgent(task))}</span><span class="meta-tag">P${esc(task.priority)}</span><span class="meta-tag">${esc(basename(task.repository))}</span>${task.current_attempt ? `<span class="meta-tag">${esc(t('task.turnFailures', {turn:task.current_attempt, failures:task.failure_count || 0, max:task.max_attempts}))}</span>` : ''}</span></button>`).join('');
+        const cards = items.map(task => `<button class="task-card" type="button" data-task-id="${esc(task.id)}"><span class="card-top"><span class="task-id">${esc(task.id)}</span><span class="status-chip" data-status="${esc(task.status)}">${esc(t(`status.${task.status}`))}</span></span><span class="task-title">${esc(task.title)}</span><span class="card-meta"><span class="meta-tag">${esc(taskAgent(task))}</span><span class="meta-tag">P${esc(task.priority)}</span><span class="meta-tag">${esc(basename(task.repository))}</span>${task.task_group_id ? `<span class="meta-tag">${esc(task.task_group_id)}</span>` : ''}${task.session_parent_task_id ? `<span class="meta-tag">↪ ${esc(task.session_parent_task_id)}</span>` : ''}${task.current_attempt ? `<span class="meta-tag">${esc(t('task.turnFailures', {turn:task.current_attempt, failures:task.failure_count || 0, max:task.max_attempts}))}</span>` : ''}</span></button>`).join('');
         return `<section class="lane" data-lane="${lane.id}"><header class="lane-head"><span class="lane-title"><i class="lane-dot"></i>${esc(t(lane.titleKey))}</span><span class="count">${items.length}</span></header><div class="card-list">${cards || `<div class="empty-lane">${esc(t('board.empty'))}</div>`}</div></section>`;
       }).join('');
     }
@@ -541,11 +547,13 @@ DASHBOARD = r"""<!doctype html>
       const modelSelect = byId('modelSelect');
       const detailModel = byId('detailModel');
       const profileSelect = byId('profileSelect');
+      const projectSelect = byId('projectSelect');
       const selected = {
         repository: repositorySelect.value,
         model: modelSelect.value,
         detailModel: detailModel.value,
-        profile: profileSelect.value
+        profile: profileSelect.value,
+        project: projectSelect.value
       };
       repositorySelect.innerHTML = state.repositories.length
         ? state.repositories.map(repo => `<option value="${esc(repo.path)}">${esc(repo.name)} — ${esc(repo.path)}</option>`).join('')
@@ -554,17 +562,20 @@ DASHBOARD = r"""<!doctype html>
       modelSelect.innerHTML = modelOptions;
       detailModel.innerHTML = modelOptions;
       profileSelect.innerHTML = `<option value="">${esc(t('common.none'))}</option>` + state.profiles.map(profile => `<option value="${esc(profile.name)}">${esc(profile.name)}</option>`).join('');
+      projectSelect.innerHTML = `<option value="">${esc(t('project.auto'))}</option>` + state.projects.map(project => `<option value="${esc(project.id)}">${esc(project.name)}</option>`).join('');
       if ([...repositorySelect.options].some(option => option.value === selected.repository)) repositorySelect.value = selected.repository;
       if ([...modelSelect.options].some(option => option.value === selected.model)) modelSelect.value = selected.model;
       if ([...detailModel.options].some(option => option.value === selected.detailModel)) detailModel.value = selected.detailModel;
       if ([...profileSelect.options].some(option => option.value === selected.profile)) profileSelect.value = selected.profile;
+      if ([...projectSelect.options].some(option => option.value === selected.project)) projectSelect.value = selected.project;
     }
 
     async function loadOptions() {
-      const [repositories, models, profiles] = await Promise.all([request('/api/repositories'), request('/api/models'), request('/api/profiles')]);
+      const [repositories, models, profiles, projects] = await Promise.all([request('/api/repositories'), request('/api/models'), request('/api/profiles'), request('/api/codex/projects')]);
       state.repositories = repositories;
       state.models = models;
       state.profiles = profiles;
+      state.projects = projects;
       renderOptions();
     }
 
@@ -583,6 +594,8 @@ DASHBOARD = r"""<!doctype html>
           [t('detail.pendingAgent'), `${task.pending_model || '—'} / ${task.pending_reasoning_effort || '—'}`], [t('detail.turn'), task.current_attempt],
           [t('detail.failures'), `${task.failure_count || 0} / ${task.max_attempts}`], [t('detail.latestTurn'), latest.turn_id || '—'],
           [t('detail.worker'), task.worker?.worker_id || '—'], [t('detail.dependencies'), (task.depends_on || []).join(', ') || t('common.none')],
+          [t('detail.taskGroup'), task.task_group_id || '—'], [t('detail.codexProject'), task.codex_project_id || '—'],
+          [t('detail.sessionParent'), task.session_parent_task_id || '—'], [t('detail.workspaceMode'), task.workspace_mode || '—'],
           [t('detail.rootThread'), task.root_thread_id || '—'], [t('detail.activeThread'), activeThread.thread_id || '—'],
           [t('detail.worktree'), task.worktree_path || '—'], [t('detail.blockedReason'), task.blocked_reason || '—']
         ].map(item => detailItem(item[0], item[1])).join('');
@@ -642,7 +655,8 @@ DASHBOARD = r"""<!doctype html>
       body.max_attempts = Number(body.max_attempts);
       body.depends_on = body.depends_on ? body.depends_on.split(',').map(item => item.trim()).filter(Boolean) : [];
       body.acceptance_commands = body.acceptance_commands ? body.acceptance_commands.split('\n').map(item => item.trim()).filter(Boolean) : [];
-      for (const key of ['model','reasoning_effort','profile','exclusive_group']) if (!body[key]) body[key] = null;
+      body.reuse_parent_worktree = body.reuse_parent_worktree === 'true';
+      for (const key of ['model','reasoning_effort','profile','exclusive_group','codex_project_id','origin_thread_id','session_parent_task_id']) if (!body[key]) body[key] = null;
       byId('createStatus').textContent = t('messages.creating');
       try {
         const created = await request('/api/tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});

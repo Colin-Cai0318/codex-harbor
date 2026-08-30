@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 from collections.abc import Iterable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -12,9 +13,11 @@ from ..domain import (
     EffectiveAgentConfig,
     PoolStatus,
     QuotaWindow,
+    SessionMode,
     TaskSpec,
     TaskStatus,
     ThreadRole,
+    WorkspaceMode,
     utc_now,
     validate_transition,
 )
@@ -45,7 +48,9 @@ class HarborRepository:
         now = utc_now()
         with self.db.connect() as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO repositories(path, name, added_at) VALUES(?, ?, ?)",
+                """INSERT INTO repositories(path, name, added_at) VALUES(?, ?, ?)
+                   ON CONFLICT(path) DO UPDATE SET
+                   name=excluded.name, added_at=excluded.added_at""",
                 (str(resolved), resolved.name, now),
             )
         return {"path": str(resolved), "name": resolved.name, "added_at": now}
@@ -78,70 +83,243 @@ class HarborRepository:
                 maximum = max(maximum, int(suffix))
         return f"T{maximum + 1:03d}"
 
+    def _next_group_id(self, conn: sqlite3.Connection) -> str:
+        rows = conn.execute(
+            "SELECT id FROM task_groups WHERE id LIKE 'G%' ORDER BY id DESC"
+        ).fetchall()
+        maximum = 0
+        for row in rows:
+            suffix = row["id"][1:]
+            if suffix.isdigit():
+                maximum = max(maximum, int(suffix))
+        return f"G{maximum + 1:03d}"
+
+    def set_repository_project(self, path: str | Path, project_id: str) -> None:
+        repository = str(Path(path).expanduser().resolve())
+        with self.db.connect() as conn:
+            conn.execute(
+                "UPDATE repositories SET codex_project_id=? WHERE path=?",
+                (project_id, repository),
+            )
+
+    def _insert_task(
+        self,
+        conn: sqlite3.Connection,
+        spec: TaskSpec,
+        repository: str,
+        now: str,
+    ) -> str:
+        if (
+            conn.execute(
+                "SELECT 1 FROM repositories WHERE path = ?", (repository,)
+            ).fetchone()
+            is None
+        ):
+            raise ValueError(
+                "repository is not registered; run 'harbor repo add' first"
+            )
+        task_id = spec.task_id or self._next_task_id(conn)
+        if not task_id or any(
+            char
+            not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+            for char in task_id
+        ):
+            raise ValueError(
+                "task id may only contain letters, digits, underscore, and hyphen"
+            )
+        dependencies = list(dict.fromkeys(spec.depends_on))
+        if spec.session_parent_task_id:
+            parent = conn.execute(
+                "SELECT repository FROM tasks WHERE id=?",
+                (spec.session_parent_task_id,),
+            ).fetchone()
+            if parent is None:
+                raise ValueError(
+                    f"unknown session parent: {spec.session_parent_task_id}"
+                )
+            if parent["repository"] != repository:
+                raise ValueError("session parent must use the same repository")
+            if spec.session_parent_task_id not in dependencies:
+                dependencies.append(spec.session_parent_task_id)
+        for dependency in dependencies:
+            if dependency == task_id:
+                raise ValueError("task cannot depend on itself")
+            if (
+                conn.execute(
+                    "SELECT 1 FROM tasks WHERE id = ?", (dependency,)
+                ).fetchone()
+                is None
+            ):
+                raise ValueError(f"unknown dependency: {dependency}")
+        conn.execute(
+            """INSERT INTO tasks(
+                id, title, description, repository, execution_backend, prompt, status,
+                priority, created_at, updated_at, max_attempts, acceptance_commands,
+                model, reasoning_effort, profile, exclusive_group, task_group_id,
+                codex_project_id, origin_thread_id, session_parent_task_id,
+                reuse_parent_worktree, workspace_mode
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                task_id,
+                spec.title,
+                spec.description,
+                repository,
+                spec.execution_backend,
+                spec.prompt,
+                TaskStatus.CREATED,
+                spec.priority,
+                now,
+                now,
+                spec.max_attempts,
+                json.dumps(spec.acceptance_commands),
+                spec.model,
+                spec.reasoning_effort,
+                spec.profile,
+                spec.exclusive_group
+                or (
+                    f"workspace:{repository.casefold()}"
+                    if WorkspaceMode(spec.workspace_mode) != WorkspaceMode.ISOLATED
+                    else None
+                ),
+                spec.task_group_id,
+                spec.codex_project_id,
+                spec.origin_thread_id,
+                spec.session_parent_task_id,
+                int(spec.reuse_parent_worktree),
+                WorkspaceMode(spec.workspace_mode),
+            ),
+        )
+        conn.executemany(
+            "INSERT INTO task_dependencies(task_id, depends_on) VALUES(?, ?)",
+            [(task_id, dependency) for dependency in dependencies],
+        )
+        self._event(conn, task_id, "TASK_CREATED", {"title": spec.title})
+        self._set_status(conn, task_id, TaskStatus.PENDING)
+        target = TaskStatus.WAIT_DEP if dependencies else TaskStatus.READY
+        self._set_status(conn, task_id, target)
+        return task_id
+
     def create_task(self, spec: TaskSpec) -> dict[str, Any]:
         repository = str(Path(spec.repository).expanduser().resolve())
         now = utc_now()
         with self.db.transaction(immediate=True) as conn:
+            task_id = self._insert_task(conn, spec, repository, now)
+        return self.get_task(task_id)
+
+    def create_task_group(
+        self,
+        *,
+        title: str,
+        repository: str | Path,
+        tasks: list[TaskSpec],
+        session_mode: SessionMode = SessionMode.ISOLATED,
+        reuse_worktree: bool = False,
+        sequential: bool = True,
+        codex_project_id: str | None = None,
+        origin_thread_id: str | None = None,
+    ) -> dict[str, Any]:
+        if not tasks:
+            raise ValueError("task group must contain at least one task")
+        mode = SessionMode(session_mode)
+        if mode == SessionMode.SHARED and not sequential:
+            raise ValueError("shared-session task groups must be sequential")
+        resolved = str(Path(repository).expanduser().resolve())
+        now = utc_now()
+        with self.db.transaction(immediate=True) as conn:
             if (
                 conn.execute(
-                    "SELECT 1 FROM repositories WHERE path = ?", (repository,)
+                    "SELECT 1 FROM repositories WHERE path=?", (resolved,)
                 ).fetchone()
                 is None
             ):
                 raise ValueError(
                     "repository is not registered; run 'harbor repo add' first"
                 )
-            task_id = spec.task_id or self._next_task_id(conn)
-            if not task_id or any(
-                char
-                not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
-                for char in task_id
-            ):
-                raise ValueError(
-                    "task id may only contain letters, digits, underscore, and hyphen"
-                )
-            for dependency in spec.depends_on:
-                if (
-                    conn.execute(
-                        "SELECT 1 FROM tasks WHERE id = ?", (dependency,)
-                    ).fetchone()
-                    is None
-                ):
-                    raise ValueError(f"unknown dependency: {dependency}")
+            group_id = self._next_group_id(conn)
             conn.execute(
-                """INSERT INTO tasks(
-                    id, title, description, repository, execution_backend, prompt, status,
-                    priority, created_at, updated_at, max_attempts, acceptance_commands,
-                    model, reasoning_effort, profile, exclusive_group
-                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO task_groups(
+                    id, title, repository, codex_project_id, origin_thread_id,
+                    session_mode, reuse_worktree, failure_policy, created_at, updated_at
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, 'block_following', ?, ?)""",
                 (
-                    task_id,
-                    spec.title,
-                    spec.description,
-                    repository,
-                    spec.execution_backend,
-                    spec.prompt,
-                    TaskStatus.CREATED,
-                    spec.priority,
+                    group_id,
+                    title,
+                    resolved,
+                    codex_project_id,
+                    origin_thread_id,
+                    mode,
+                    int(reuse_worktree),
                     now,
                     now,
-                    spec.max_attempts,
-                    json.dumps(spec.acceptance_commands),
-                    spec.model,
-                    spec.reasoning_effort,
-                    spec.profile,
-                    spec.exclusive_group,
                 ),
             )
-            conn.executemany(
-                "INSERT INTO task_dependencies(task_id, depends_on) VALUES(?, ?)",
-                [(task_id, dependency) for dependency in spec.depends_on],
+            previous_id: str | None = None
+            task_ids: list[str] = []
+            for item in tasks:
+                dependencies = list(item.depends_on)
+                if sequential and previous_id and previous_id not in dependencies:
+                    dependencies.append(previous_id)
+                parent_id = (
+                    previous_id
+                    if mode == SessionMode.SHARED and previous_id
+                    else item.session_parent_task_id
+                )
+                prepared = replace(
+                    item,
+                    repository=resolved,
+                    depends_on=dependencies,
+                    task_group_id=group_id,
+                    codex_project_id=item.codex_project_id or codex_project_id,
+                    origin_thread_id=item.origin_thread_id or origin_thread_id,
+                    session_parent_task_id=parent_id,
+                    reuse_parent_worktree=(
+                        reuse_worktree if parent_id and mode == SessionMode.SHARED
+                        else item.reuse_parent_worktree
+                    ),
+                    workspace_mode=(
+                        WorkspaceMode.INHERIT
+                        if parent_id and reuse_worktree
+                        else item.workspace_mode
+                    ),
+                )
+                task_id = self._insert_task(conn, prepared, resolved, now)
+                task_ids.append(task_id)
+                previous_id = task_id
+            self._event(
+                conn,
+                None,
+                "TASK_GROUP_CREATED",
+                {"group_id": group_id, "tasks": task_ids, "mode": mode},
             )
-            self._event(conn, task_id, "TASK_CREATED", {"title": spec.title})
-            self._set_status(conn, task_id, TaskStatus.PENDING)
-            target = TaskStatus.WAIT_DEP if spec.depends_on else TaskStatus.READY
-            self._set_status(conn, task_id, target)
-        return self.get_task(task_id)
+        return self.get_task_group(group_id)
+
+    def get_task_group(self, group_id: str) -> dict[str, Any]:
+        with self.db.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM task_groups WHERE id=?", (group_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(group_id)
+            task_ids = [
+                item["id"]
+                for item in conn.execute(
+                    "SELECT id FROM tasks WHERE task_group_id=? ORDER BY created_at, id",
+                    (group_id,),
+                )
+            ]
+        result = dict(row)
+        result["tasks"] = [self.get_task(task_id) for task_id in task_ids]
+        return result
+
+    def list_task_groups(self) -> list[dict[str, Any]]:
+        with self.db.connect() as conn:
+            ids = [
+                row["id"]
+                for row in conn.execute(
+                    "SELECT id FROM task_groups ORDER BY created_at, id"
+                )
+            ]
+        return [self.get_task_group(group_id) for group_id in ids]
 
     def get_task(self, task_id: str) -> dict[str, Any]:
         with self.db.connect() as conn:
@@ -160,10 +338,23 @@ class HarborRepository:
             task["threads"] = [
                 dict(row)
                 for row in conn.execute(
-                    "SELECT * FROM codex_threads WHERE task_id = ? ORDER BY created_at",
+                    """SELECT ct.*, links.role AS linked_role,
+                              links.inherited_from_task_id, links.linked_at
+                       FROM task_thread_links links
+                       JOIN codex_threads ct ON ct.thread_id=links.thread_id
+                       WHERE links.task_id=? ORDER BY links.linked_at""",
                     (task_id,),
                 )
             ]
+            group = (
+                conn.execute(
+                    "SELECT * FROM task_groups WHERE id=?",
+                    (task["task_group_id"],),
+                ).fetchone()
+                if task.get("task_group_id")
+                else None
+            )
+            task["task_group"] = dict(group) if group is not None else None
             latest_attempt = conn.execute(
                 """SELECT attempt_number, thread_id, turn_id, started_at, finished_at, result,
                           error_type, requested_model, requested_reasoning_effort,
@@ -278,9 +469,35 @@ class HarborRepository:
         changed = 0
         with self.db.transaction(immediate=True) as conn:
             waiting = conn.execute(
-                "SELECT id FROM tasks WHERE status='WAIT_DEP'"
+                """SELECT id, status FROM tasks
+                   WHERE status='WAIT_DEP'
+                      OR (status='BLOCKED' AND blocked_reason LIKE 'UPSTREAM_FAILED:%')"""
             ).fetchall()
             for task in waiting:
+                failed = [
+                    row["id"]
+                    for row in conn.execute(
+                        """SELECT t.id FROM task_dependencies d
+                           JOIN tasks t ON t.id=d.depends_on
+                           WHERE d.task_id=?
+                             AND t.status IN ('FAILED','BLOCKED','CANCELLED')
+                           ORDER BY t.id""",
+                        (task["id"],),
+                    )
+                ]
+                if failed:
+                    reason = f"UPSTREAM_FAILED:{','.join(failed)}"
+                    if task["status"] != TaskStatus.BLOCKED:
+                        self._set_status(
+                            conn, task["id"], TaskStatus.BLOCKED, reason=reason
+                        )
+                        changed += 1
+                    else:
+                        conn.execute(
+                            "UPDATE tasks SET blocked_reason=?, updated_at=? WHERE id=?",
+                            (reason, utc_now(), task["id"]),
+                        )
+                    continue
                 incomplete = conn.execute(
                     """SELECT 1 FROM task_dependencies d JOIN tasks t ON t.id=d.depends_on
                        WHERE d.task_id=? AND t.status <> 'SUCCEEDED' LIMIT 1""",
@@ -288,6 +505,9 @@ class HarborRepository:
                 ).fetchone()
                 if incomplete is None:
                     self._set_status(conn, task["id"], TaskStatus.READY)
+                    changed += 1
+                elif task["status"] == TaskStatus.BLOCKED:
+                    self._set_status(conn, task["id"], TaskStatus.WAIT_DEP)
                     changed += 1
         return changed
 
@@ -300,6 +520,9 @@ class HarborRepository:
                 conditions.append("t.grandfathered=1")
             conditions.append(
                 "(t.exclusive_group IS NULL OR NOT EXISTS (SELECT 1 FROM tasks a WHERE a.exclusive_group=t.exclusive_group AND a.status IN ('CLAIMED','RUNNING','WAIT_QUOTA','RETRY_WAIT')))"
+            )
+            conditions.append(
+                "NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks dep ON dep.id=d.depends_on WHERE d.task_id=t.id AND dep.status <> 'SUCCEEDED')"
             )
             row = conn.execute(
                 f"SELECT t.* FROM tasks t WHERE {' AND '.join(conditions)} ORDER BY t.priority, t.created_at, t.id LIMIT 1"
@@ -410,14 +633,35 @@ class HarborRepository:
         *,
         parent_thread_id: str | None = None,
         model: str | None = None,
+        project_id: str | None = None,
     ) -> None:
         now = utc_now()
         with self.db.transaction(immediate=True) as conn:
             conn.execute(
-                """INSERT INTO codex_threads(thread_id, task_id, role, parent_thread_id, state, model, created_at, last_used_at)
-                   VALUES(?, ?, ?, ?, 'ACTIVE', ?, ?, ?)
-                   ON CONFLICT(thread_id) DO UPDATE SET state='ACTIVE', last_used_at=excluded.last_used_at""",
-                (thread_id, task_id, role, parent_thread_id, model, now, now),
+                """INSERT INTO codex_threads(
+                       thread_id, task_id, role, parent_thread_id, state, model,
+                       project_id, created_at, last_used_at
+                   ) VALUES(?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?)
+                   ON CONFLICT(thread_id) DO UPDATE SET
+                       state='ACTIVE', last_used_at=excluded.last_used_at,
+                       project_id=COALESCE(excluded.project_id, codex_threads.project_id)""",
+                (
+                    thread_id,
+                    task_id,
+                    role,
+                    parent_thread_id,
+                    model,
+                    project_id,
+                    now,
+                    now,
+                ),
+            )
+            conn.execute(
+                """INSERT INTO task_thread_links(
+                       task_id, thread_id, role, inherited_from_task_id, linked_at
+                   ) VALUES(?, ?, ?, NULL, ?)
+                   ON CONFLICT(task_id, thread_id) DO UPDATE SET role=excluded.role""",
+                (task_id, thread_id, role, now),
             )
             if role == ThreadRole.ROOT:
                 conn.execute(
@@ -431,11 +675,79 @@ class HarborRepository:
                 {"thread_id": thread_id, "role": role},
             )
 
-    def set_worktree(self, task_id: str, path: str) -> None:
+    def link_shared_thread(
+        self,
+        task_id: str,
+        thread_id: str,
+        source_task_id: str,
+        *,
+        project_id: str | None = None,
+    ) -> None:
+        now = utc_now()
+        with self.db.transaction(immediate=True) as conn:
+            thread = conn.execute(
+                "SELECT 1 FROM codex_threads WHERE thread_id=?", (thread_id,)
+            ).fetchone()
+            if thread is None:
+                raise ValueError(f"unknown Codex thread: {thread_id}")
+            conn.execute(
+                """INSERT INTO task_thread_links(
+                       task_id, thread_id, role, inherited_from_task_id, linked_at
+                   ) VALUES(?, ?, 'ROOT', ?, ?)
+                   ON CONFLICT(task_id, thread_id) DO UPDATE SET
+                       inherited_from_task_id=excluded.inherited_from_task_id""",
+                (task_id, thread_id, source_task_id, now),
+            )
+            conn.execute(
+                """UPDATE tasks SET root_thread_id=?, codex_project_id=COALESCE(?, codex_project_id),
+                   updated_at=? WHERE id=?""",
+                (thread_id, project_id, now, task_id),
+            )
+            if project_id:
+                conn.execute(
+                    "UPDATE codex_threads SET project_id=? WHERE thread_id=?",
+                    (project_id, thread_id),
+                )
+            self._event(
+                conn,
+                task_id,
+                "CODEX_THREAD_INHERITED",
+                {"thread_id": thread_id, "from_task": source_task_id},
+            )
+
+    def set_task_project(self, task_id: str, project_id: str) -> None:
+        with self.db.transaction(immediate=True) as conn:
+            conn.execute(
+                "UPDATE tasks SET codex_project_id=?, updated_at=? WHERE id=?",
+                (project_id, utc_now(), task_id),
+            )
+            conn.execute(
+                "UPDATE task_groups SET codex_project_id=?, updated_at=? WHERE id=(SELECT task_group_id FROM tasks WHERE id=?)",
+                (project_id, utc_now(), task_id),
+            )
+            self._event(
+                conn, task_id, "CODEX_PROJECT_BOUND", {"project_id": project_id}
+            )
+
+    def set_worktree(
+        self,
+        task_id: str,
+        path: str,
+        *,
+        owner_task_id: str | None = None,
+        owned: bool = False,
+    ) -> None:
         with self.db.connect() as conn:
             conn.execute(
-                "UPDATE tasks SET worktree_path=?, updated_at=? WHERE id=?",
-                (path, utc_now(), task_id),
+                """UPDATE tasks SET worktree_path=?, worktree_owner_task_id=?,
+                   workspace_owned=?, updated_at=? WHERE id=?""",
+                (
+                    path,
+                    owner_task_id or (task_id if owned else None),
+                    int(owned),
+                    utc_now(),
+                    task_id,
+                ),
             )
 
     def set_claim_running(self, task_id: str) -> None:
@@ -679,19 +991,39 @@ class HarborRepository:
             TaskStatus.CANCELLED,
         }:
             raise ValueError(f"task {task_id} is not retryable from {task['status']}")
+        target = (
+            TaskStatus.WAIT_DEP
+            if str(task.get("blocked_reason") or "").startswith("UPSTREAM_FAILED:")
+            else TaskStatus.READY
+        )
         with self.db.transaction(immediate=True) as conn:
             conn.execute(
                 "UPDATE tasks SET failure_count=0, updated_at=? WHERE id=?",
                 (utc_now(), task_id),
             )
-            self._set_status(conn, task_id, TaskStatus.READY)
+            self._set_status(conn, task_id, target)
         return self.get_task(task_id)
 
     def delete_task(self, task_id: str) -> None:
         task = self.get_task(task_id)
         if TaskStatus(task["status"]) in ACTIVE_TASK_STATES:
             raise ValueError("cancel an active task before deleting it")
-        with self.db.connect() as conn:
+        with self.db.transaction(immediate=True) as conn:
+            owned_threads = conn.execute(
+                "SELECT thread_id FROM codex_threads WHERE task_id=?", (task_id,)
+            ).fetchall()
+            for thread in owned_threads:
+                replacement = conn.execute(
+                    """SELECT task_id FROM task_thread_links
+                       WHERE thread_id=? AND task_id<>?
+                       ORDER BY linked_at LIMIT 1""",
+                    (thread["thread_id"], task_id),
+                ).fetchone()
+                if replacement:
+                    conn.execute(
+                        "UPDATE codex_threads SET task_id=? WHERE thread_id=?",
+                        (replacement["task_id"], thread["thread_id"]),
+                    )
             conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
 
     def apply_pending_agent_config(self, task_id: str) -> None:

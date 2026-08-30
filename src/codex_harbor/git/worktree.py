@@ -74,6 +74,27 @@ class WorktreeManager:
         await self._git(repo, *args)
         return target
 
+    async def use_existing_workspace(
+        self, repository: str | Path, workspace: str | Path
+    ) -> Path:
+        repo = await self.validate_repository(repository)
+        candidate = Path(workspace).expanduser().resolve()
+        if not candidate.is_dir():
+            raise GitError(f"existing workspace does not exist: {candidate}")
+        top = Path(
+            await self._git(candidate, "rev-parse", "--show-toplevel")
+        ).resolve()
+
+        async def common_dir(path: Path) -> Path:
+            value = Path(await self._git(path, "rev-parse", "--git-common-dir"))
+            return (path / value).resolve() if not value.is_absolute() else value.resolve()
+
+        if await common_dir(top) != await common_dir(repo):
+            raise GitError(
+                f"workspace does not belong to registered repository: {top}"
+            )
+        return top
+
     async def head(self, worktree: str | Path) -> str:
         return await self._git(Path(worktree), "rev-parse", "HEAD")
 

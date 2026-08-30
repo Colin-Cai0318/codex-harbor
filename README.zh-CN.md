@@ -4,8 +4,8 @@
 
 ### 面向 Codex 的持久化任务编排器
 
-将 Codex 会话变成可持久化、可调度的开发任务，并提供 Git worktree 隔离、
-配额感知执行以及跨进程恢复能力。
+将 Codex 会话变成可持久化、可调度的开发任务，并提供 Codex Project 集成、
+现有工作区复用、配额感知执行以及跨进程恢复能力。
 
 [![CI](https://github.com/Colin-Cai0318/codex-harbor/actions/workflows/ci.yml/badge.svg)](https://github.com/Colin-Cai0318/codex-harbor/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -20,8 +20,8 @@
 ---
 
 Codex Harbor 是构建在 Codex App Server 之上的本地优先控制平面。它使用
-SQLite 保存调度状态、使用 Git worktree 隔离代码改动，并通过恢复信封确保
-任务身份不依赖某个终端、Worker、Codex 进程或 Desktop 侧边栏。
+SQLite 保存调度状态、Codex Project 让对话继续显示在 Codex 应用中，并通过
+恢复信封确保任务身份不依赖某个终端、Worker、Codex 进程或侧边栏。
 
 > [!IMPORTANT]
 > Codex Harbor 当前为 MVP。Windows Native 仍处于 Beta 阶段；升级 Codex CLI
@@ -53,7 +53,7 @@ SQLite 保存调度状态、使用 Git worktree 隔离代码改动，并通过�
 | 需求 | Harbor 的处理方式 |
 |---|---|
 | 跨进程恢复 | 在 SQLite/WAL 中保存任务、Attempt、Codex Thread、Worker、配额和事件 |
-| 安全并行 | 事务式领取任务，每个任务使用独立 Git worktree |
+| 和 Codex 使用同一份代码 | 默认复用 Project/当前对话已有工作区，独立 worktree 改为显式选项 |
 | 保证执行顺序 | 支持依赖关系、优先级 + FIFO 以及互斥组 |
 | 应对配额暂停 | 任务状态机与资源池状态机分离，支持等待、排空、冻结和恢复 |
 | 明确 Agent 配置 | 动态校验模型与推理等级能力，绝不静默降级 |
@@ -73,33 +73,45 @@ flowchart LR
     D --> S[调度器 + 资源池控制器]
     S --> W[Worker 池]
     W --> AS[Codex App Server]
-    W --> WT[每任务独立 Git worktree]
+    W --> WS[现有 Project 工作区<br/>或显式独立 Worktree]
     D --> DB[(SQLite / WAL)]
     W --> DB
 ```
 
-Daemon 统一管理一个 App Server 进程。模型和推理等级配置始终归属于具体任务，
-不会通过 Worker 在任务之间泄漏全局 Agent 状态。
+Daemon 统一管理一个 App Server 进程。模型和推理等级配置始终归属于具体任务。
+即使全局并行数大于 1，写入同一个现有工作区的任务也会自动串行执行。
 
 ## Task、Session 与 Turn 的关系
 
 Harbor 不会替代或绕开 Codex Session。它通过 App Server 把任务调度到持久化的
-Codex Thread 中，因此对话记录仍保存在 Codex 自己的 Thread 存储里，并会以
-`[T001] 任务标题` 这样的名称便于在 Codex 应用中识别。Harbor Dashboard 负责补充
-生命周期、并发和额度控制，并不是另一套聊天记录系统。
+Codex Thread 中，并把 Thread 归入匹配的 Codex Project。对话记录仍保存在 Codex
+自己的 Thread 存储里，在应用中显示为 `[T001] 任务标题` 或 `[G001] 任务组标题`。
+Harbor Dashboard 负责补充生命周期、并发和额度控制，并不是另一套聊天记录系统。
 
 | Harbor/Codex 对象 | 含义 | 生命周期 |
 |---|---|---|
 | Task | 业务目标、仓库、提示词、验收标准、依赖和调度状态 | 直到被显式删除 |
-| Root Thread | 任务的主要 Codex Session 和对话历史 | 跨 Worker、App Server 重启复用 |
+| Codex Project | 由 Codex 应用管理的工作区根目录与持久化 Thread 集合 | Codex 与 Harbor 共同使用 |
+| Root Thread | 持久化 Codex Session 和对话历史 | 默认一个任务独享；也可由任务链共享 |
 | Recovery Thread | 仅在原 Thread 无法恢复时 Fork 或新建 | 仍关联同一个 Task |
 | Turn | Thread 内的一次提示词执行 | 与 Thread ID、执行轮次一起记录 |
 | 计入预算的失败 | 会消耗失败重试上限的运行或验收失败 | 与 Turn 数量独立计算 |
 
-正常关系是一个 Task 对应一个 Root Thread，并在其中产生多个 Turn。第一个 Turn
-注入完整任务信封；验收反馈和额度重置后的恢复提示词会作为后续 Turn 注入同一
-Thread。额度耗尽会记录为 `WAIT_QUOTA`：这个 Turn 和错误证据会保留，但不会增加
-“计入预算的失败”数量。
+默认关系是一个 Task 对应一个 Root Thread，并在其中产生多个 Turn。共享 Session
+任务组则把多个有序 Task 关联到同一个 Thread：T001 成功后，Harbor 会把 T002 的
+新目标注入 T001 的 Session，从而保留前文上下文。验收反馈和额度恢复提示词也会
+作为后续 Turn 注入同一 Thread。额度耗尽会记录为 `WAIT_QUOTA`：这个 Turn 和错误
+证据会保留，但不会增加“计入预算的失败”数量。
+
+```mermaid
+flowchart LR
+    P[Codex Project] --> G[Harbor 任务组]
+    G --> T1[T001]
+    G --> T2[T002 依赖 T001]
+    T1 --> S[共享 Codex Thread]
+    T2 --> S
+    S --> W[现有 Project 工作区]
+```
 
 ```mermaid
 flowchart LR
@@ -116,13 +128,18 @@ flowchart LR
 `thread/resume`，再启动下一个 Turn；不会因为额度耗尽而创建一条脱离 Codex 的
 替代 Session。
 
+如果上游任务发生终态失败，后续依赖任务会以 `UPSTREAM_FAILED` 原因进入
+`BLOCKED`。重试上游后，后续任务会回到 `WAIT_DEP`；上游成功后才注入下一条
+提示词。`WAIT_QUOTA` 不是终态，所以不会永久阻塞任务链。
+
 ## 核心能力
 
 ### 持久化调度
 
 - 持久化保存仓库、任务、依赖、Attempt、Thread、Worker、配额、资源池和事件。
 - 通过事务领取任务，并按优先级/FIFO 排序。
-- 支持依赖门禁、互斥组、并行 Worker、有限重试和验收失败后的后续 Turn。
+- 支持依赖门禁、终态失败向后传播、共享 Session 任务组、并行 Worker、有限重试
+  和验收失败后的后续 Turn。
 - 提供 `WAIT_QUOTA`、`RETRY_WAIT`、`BLOCKED` 等任务状态，以及
   `DRAINING`、`FROZEN` 等独立资源池状态。
 - 支持在运行时调整并持久化最大并行任务数（1–64）。
@@ -130,13 +147,16 @@ flowchart LR
 ### 原生 Codex 集成
 
 - 实现 App Server 初始化以及持久化 Thread/Turn 操作。
+- 按工作区根目录发现 Codex Project，通过 `projectId` 归档新 Thread，并可把发起
+  任务的原 Codex 对话绑定到同一 Project。
 - 支持创建、读取、恢复和 Fork Codex Thread，不依赖内部 rollout JSONL 格式。
 - 动态读取模型列表并验证所选推理等级是否受支持。
 - 通过当前 App Server 协议读取结构化账户配额。
 
 ### 隔离、恢复与可观测性
 
-- 在 Harbor 管理的 Git worktree 中创建 `harbor/<task-id>` 分支。
+- 默认使用发起对话的现有工作区（否则使用注册仓库根目录）；仅在隔离模式创建
+  `harbor/<task-id>` worktree。
 - 支持本地 Linux、Windows Native 和 WSL 执行后端。
 - 保存恢复信封，并根据心跳识别失联 Worker。
 - 持久化任务历史和命令输出前，对 Authorization、API Key、Cookie 和密码脱敏。
@@ -183,6 +203,7 @@ uv run harbor task add `
   --title "完善 BossHunter 使用文档" `
   --prompt "检查现有 README，补充安装、启动和验证步骤；不要修改业务代码" `
   --backend windows `
+  --workspace-mode project `
   --reasoning high `
   --accept "git diff --check"
 ```
@@ -239,9 +260,9 @@ git -C "F:\BossHunter" remote -v
 名称。
 
 > [!WARNING]
-> Harbor 为任务创建的 worktree 基于仓库当前已提交的 `HEAD`。源工作区中的
-> 未提交和未跟踪文件不会自动复制进任务 worktree；需要让任务看到的改动应先
-> 正确提交，或者在任务 prompt 中明确安排其他安全的准备方式。
+> 默认的 `project` 工作区模式会直接操作 Codex 已有工作区。任务能看到其中未提交
+> 和未跟踪的文件，任务改动也直接出现在该目录。只有明确需要隔离时才使用
+> `--workspace-mode isolated` 创建独立 `harbor/<task-id>` worktree。
 
 ### 第二步：在 Codex Harbor 目录中注册
 
@@ -305,7 +326,7 @@ uv run harbor ps
 | `repository is not registered` | 创建任务使用了另一条路径，或命令连接了不同的数据目录；重新执行 `repo add` 并检查 `repo list` |
 | `repo list` 仍是空数组 | CLI 与 daemon 可能使用了不同的 `HARBOR_DATA_DIR` 或 `--config`；两边必须使用同一配置 |
 | GitHub URL 无法注册 | 这是预期行为；先 clone，再注册本地目录 |
-| 任务中看不到本地未提交改动 | worktree 从已提交的 `HEAD` 创建；先处理并提交需要纳入任务的改动 |
+| 任务中看不到本地未提交改动 | 确认任务使用 `project` 模式；隔离 worktree 会有意从已提交 `HEAD` 开始 |
 | Dashboard 下拉框没有新仓库 | 刷新页面；仓库选项在页面载入时读取 |
 
 ## 配置说明
@@ -335,7 +356,8 @@ uv run harbor init
 
 ## YAML 任务文件
 
-任务既可以逐个创建，也可以从 YAML 导入：
+任务既可以逐个创建，也可以从 YAML 导入。默认的
+`workspace_mode: project` 使用已注册的现有工作区，不会新建 worktree：
 
 ```bash
 uv run harbor task import docs/task-example.yaml
@@ -359,10 +381,48 @@ acceptance:
   commands:
     - pytest tests/watchdog -q
 max_attempts: 5
+workspace_mode: project
 ```
 
 优先级数字越小越先执行；相同优先级按 FIFO 排序。`max_attempts` 表示计入预算的
 失败重试上限，等待额度的 Turn 不会消耗它。
+
+### 在同一个 Codex Session 中顺序执行多个任务
+
+可以从 Codex Harbor 插件/Skill 或任意回环客户端创建任务组：
+
+```powershell
+$body = @{
+  title = "Codex Harbor 后续开发"
+  repository = "E:\Tools\Codex_Harbor"
+  session_mode = "shared"
+  workspace_mode = "project"
+  sequential = $true
+  codex_project_id = "<Codex Project ID>"
+  origin_thread_id = "<当前 Codex 对话 ID>"
+  tasks = @(
+    @{ title = "数据库修改"; prompt = "完成数据库修改"; priority = 10; acceptance_commands = @("uv run pytest -q") },
+    @{ title = "调度器修改"; prompt = "沿用上一个任务的 Session，继续完成调度器修改"; priority = 20; acceptance_commands = @("uv run pytest -q") }
+  )
+} | ConvertTo-Json -Depth 6
+
+Invoke-RestMethod -Method Post `
+  -Uri "http://127.0.0.1:8765/api/task-groups" `
+  -ContentType "application/json" -Body $body
+```
+
+`session_mode: shared` 表示后一个 Task 复用前一个 Task 的 Codex Thread；
+`isolated` 表示每个 Task 使用独立 Thread。`workspace_mode: project` 复用现有代码
+目录；工作区模式设为 `isolated` 才创建 Harbor worktree。有序任务组会自动添加
+T002 → T001 依赖，只有前一项成功后才注入下一项提示词。
+
+也可以使用可复制修改的 YAML：
+
+```powershell
+Copy-Item docs\task-group-example.yaml .\my-task-group.yaml
+# 修改仓库路径、提示词、Project ID，以及可选的发起对话 Thread ID。
+uv run harbor task group-import .\my-task-group.yaml
+```
 
 ## CLI 命令参考
 
@@ -370,7 +430,7 @@ max_attempts: 5
 |---|---|
 | `harbor init` | 创建数据目录、数据库和默认配置 |
 | `harbor repo add\|list` | 注册或列出可用 Git 仓库 |
-| `harbor task add\|import\|list\|show` | 创建和查看任务 |
+| `harbor task add\|import\|group-import\|list\|show` | 创建单任务或原子任务组并查看结果 |
 | `harbor task config` | 调整任务的模型或推理等级 |
 | `harbor task retry\|cancel\|cleanup` | 管理任务生命周期和 Harbor worktree |
 | `harbor ps` | 查看资源池、Worker 和活动任务 |
@@ -420,6 +480,7 @@ CI 矩阵覆盖 Ubuntu、Windows 与 Python 3.11、3.13。确定性测试使用 
 - [实现映射](docs/IMPLEMENTATION.md)
 - [验证记录](docs/VALIDATION.md)
 - [任务示例](docs/task-example.yaml)
+- [共享 Session 任务组示例](docs/task-group-example.yaml)
 
 ## 安全边界
 
@@ -432,7 +493,8 @@ CI 矩阵覆盖 Ubuntu、Windows 与 Python 3.11、3.13。确定性测试使用 
 - 配额耗尽属于等待状态和已记录 Turn，但不计入失败重试预算。
 - 模型能力不受支持时会阻塞任务，不会偷偷更换模型或推理等级。
 - Codex 身份认证仍由 Codex 管理；Harbor 不保存其凭据。
-- `task cleanup` 会校验已注册 Git Root，只删除指定的 Harbor worktree，并保留分支。
+- `task cleanup` 永远不会删除现有 Project 工作区；它只接受 Harbor 自己创建的精确
+  隔离 worktree 路径，并保留对应分支。
 - API 默认仅监听回环地址，绝不会默认绑定 `0.0.0.0`。
 
 ## 项目状态

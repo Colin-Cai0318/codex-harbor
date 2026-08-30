@@ -13,6 +13,8 @@ from codex_harbor.domain import (
     RuntimeTurnResult,
     TaskSpec,
     TaskStatus,
+    SessionMode,
+    WorkspaceMode,
 )
 from codex_harbor.execution import select_backend
 from codex_harbor.git import WorktreeManager
@@ -25,23 +27,27 @@ from codex_harbor.worker.worker import classify_error
 class FakeRuntime(AgentRuntime):
     def __init__(self):
         self.prompts: list[str] = []
+        self.calls: list[tuple[str, str | None]] = []
 
     async def start_task(
         self, cwd: str, prompt: str, config: EffectiveAgentConfig
     ) -> RuntimeTurnResult:
         self.prompts.append(prompt)
+        self.calls.append(("start", None))
         return RuntimeTurnResult("thread-1", "turn-1", "completed")
 
     async def resume_task(
         self, thread_id: str, cwd: str, prompt: str, config: EffectiveAgentConfig
     ) -> RuntimeTurnResult:
         self.prompts.append(prompt)
+        self.calls.append(("resume", thread_id))
         return RuntimeTurnResult(thread_id, "turn-r", "completed")
 
     async def start_turn(
         self, thread_id: str, cwd: str, prompt: str, config: EffectiveAgentConfig
     ) -> RuntimeTurnResult:
         self.prompts.append(prompt)
+        self.calls.append(("turn", thread_id))
         return RuntimeTurnResult(thread_id, f"turn-{len(self.prompts)}", "completed")
 
     async def inspect_thread(self, thread_id: str) -> dict:
@@ -256,3 +262,63 @@ async def test_quota_turn_is_preserved_and_new_worker_resumes_same_thread(
         "turn-resumed",
     ]
     assert {item["thread_id"] for item in attempts} == {"thread-quota"}
+
+
+@pytest.mark.asyncio
+async def test_shared_session_group_reuses_thread_and_existing_project_workspace(
+    repository, git_repo, tmp_path, config_values
+):
+    group = repository.create_task_group(
+        title="database follow-up",
+        repository=git_repo,
+        session_mode=SessionMode.SHARED,
+        reuse_worktree=True,
+        tasks=[
+            TaskSpec(
+                title="database schema",
+                repository=str(git_repo),
+                prompt="Implement the database schema",
+                acceptance_commands=["git status --short"],
+            ),
+            TaskSpec(
+                title="database follow-up",
+                repository=str(git_repo),
+                prompt="Improve the schema using the previous context",
+                acceptance_commands=["git status --short"],
+            ),
+        ],
+    )
+    first_id, second_id = [item["id"] for item in group["tasks"]]
+    assert group["tasks"][0]["workspace_mode"] == WorkspaceMode.PROJECT
+    assert group["tasks"][1]["workspace_mode"] == WorkspaceMode.INHERIT
+    assert group["tasks"][1]["session_parent_task_id"] == first_id
+    runtime = FakeRuntime()
+
+    async def run_claimed(worker_id: str) -> None:
+        worker = Worker(
+            repository,
+            runtime,
+            ModelRegistry(MODELS),
+            WorktreeManager(repository, tmp_path / "worktrees"),
+            AcceptanceRunner(select_backend("local"), timeout=30),
+            config_values,
+            tmp_path / "data",
+            worker_id,
+        )
+        await worker.run(repository.claim_next(worker_id))
+
+    await run_claimed("shared-1")
+    assert repository.refresh_dependencies() == 1
+    await run_claimed("shared-2")
+
+    first = repository.get_task(first_id)
+    second = repository.get_task(second_id)
+    assert first["status"] == second["status"] == TaskStatus.SUCCEEDED
+    assert first["root_thread_id"] == second["root_thread_id"] == "thread-1"
+    assert first["worktree_path"] == second["worktree_path"] == str(git_repo)
+    assert first["workspace_owned"] == second["workspace_owned"] == 0
+    assert not (tmp_path / "worktrees" / first_id).exists()
+    assert not (tmp_path / "worktrees" / second_id).exists()
+    assert runtime.calls == [("start", None), ("resume", "thread-1")]
+    assert "Continue the shared Harbor session with a new task" in runtime.prompts[1]
+    assert "Previous Task:" in runtime.prompts[1]

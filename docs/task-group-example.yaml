@@ -1,0 +1,27 @@
+title: Codex Harbor feature implementation
+repository:
+  path: E:\Tools\Codex_Harbor
+session_mode: shared
+workspace_mode: project
+sequential: true
+codex_project_id: null
+origin_thread_id: null
+tasks:
+  - title: Database changes
+    prompt: Implement the requested database changes and preserve compatibility.
+    priority: 10
+    agent:
+      model: null
+      reasoning_effort: high
+    acceptance:
+      commands:
+        - uv run pytest -q
+  - title: Scheduler changes
+    prompt: Continue from the database task context and implement the scheduler changes.
+    priority: 20
+    agent:
+      model: null
+      reasoning_effort: high
+    acceptance:
+      commands:
+        - uv run pytest -q

@@ -16,6 +16,14 @@ When creating tasks:
 - Preserve the user's requested task boundaries. Add dependencies only where completion is genuinely required.
 - Put model and reasoning configuration on each task. Use `null` for inheritance; never invent a model name or silently downgrade reasoning.
 - Include acceptance commands that test observable outcomes. Do not mark a Task successful yourself; Harbor's Acceptance Runner owns that decision.
+- Default `workspace_mode` to `project` so Harbor uses the current Codex Project/conversation workspace. Use `isolated` only when the user explicitly wants a separate Harbor worktree.
+- When the user splits one objective into ordered Tasks, prefer `POST /api/task-groups`. Use `session_mode: shared` when later Tasks should inherit the preceding Codex conversation, or `isolated` when each Task needs its own Session.
+- Include the current Codex Project ID and originating Thread ID when they are available. If only the Project root is known, Harbor discovers the matching Project; never guess a Thread ID.
+- Shared-session groups must be sequential. A terminal upstream failure blocks later Tasks; `WAIT_QUOTA` is resumable and does not permanently block the chain.
+
+Project workspaces are user-owned existing checkouts. Tasks targeting the same
+workspace are serialized automatically, and cleanup must never be requested for
+them. Only Harbor-owned isolated worktrees are eligible for cleanup.
 
 User requests such as “create,” “cancel,” “retry,” “pause,” “freeze,” or “resume” authorize that exact Harbor mutation. For ambiguous bulk mutations, show the affected task IDs and ask for the missing scope before writing. Reads do not require confirmation.
 

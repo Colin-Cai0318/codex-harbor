@@ -19,7 +19,7 @@ from .codex import (
     resolve_codex_executable,
 )
 from .daemon import serve
-from .domain import PoolStatus, TaskSpec
+from .domain import PoolStatus, SessionMode, TaskSpec, WorkspaceMode
 from .execution.local import platform_summary
 from .git import WorktreeManager
 from .quota import CodexQuotaProvider, QuotaManager
@@ -58,6 +58,11 @@ def _task_spec(data: dict[str, Any]) -> TaskSpec:
         model=agent.get("model", data.get("model")),
         reasoning_effort=agent.get("reasoning_effort", data.get("reasoning_effort")),
         profile=data.get("profile"),
+        codex_project_id=data.get("codex_project_id"),
+        origin_thread_id=data.get("origin_thread_id"),
+        session_parent_task_id=data.get("session_parent_task_id"),
+        reuse_parent_worktree=bool(data.get("reuse_parent_worktree", False)),
+        workspace_mode=WorkspaceMode(data.get("workspace_mode", "project")),
     )
 
 
@@ -84,6 +89,20 @@ def _add_task_parser(task_sub: argparse._SubParsersAction) -> None:
     add.add_argument("--model")
     add.add_argument("--reasoning")
     add.add_argument("--profile")
+    add.add_argument("--codex-project")
+    add.add_argument("--origin-thread")
+    add.add_argument("--session-parent")
+    add.add_argument(
+        "--reuse-parent-workspace",
+        action="store_true",
+        help="reuse the parent task's existing workspace with its Codex session",
+    )
+    add.add_argument(
+        "--workspace-mode",
+        choices=["project", "isolated", "inherit"],
+        default="project",
+        help="project uses the existing Codex/Git workspace; isolated is opt-in",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -102,6 +121,10 @@ def build_parser() -> argparse.ArgumentParser:
     _add_task_parser(task_sub)
     imported = task_sub.add_parser("import")
     imported.add_argument("path")
+    group_import = task_sub.add_parser(
+        "group-import", help="create an atomic ordered task group from YAML"
+    )
+    group_import.add_argument("path")
     task_sub.add_parser("list")
     show = task_sub.add_parser("show")
     show.add_argument("task_id")
@@ -256,6 +279,11 @@ def dispatch(args: argparse.Namespace) -> int:
                         model=args.model,
                         reasoning_effort=args.reasoning,
                         profile=args.profile,
+                        codex_project_id=args.codex_project,
+                        origin_thread_id=args.origin_thread,
+                        session_parent_task_id=args.session_parent,
+                        reuse_parent_worktree=args.reuse_parent_workspace,
+                        workspace_mode=WorkspaceMode(args.workspace_mode),
                     )
                 )
             )
@@ -269,6 +297,43 @@ def dispatch(args: argparse.Namespace) -> int:
             if isinstance(items, dict):
                 items = [items]
             _json([repository.create_task(_task_spec(item)) for item in items])
+        elif args.task_command == "group-import":
+            data = yaml.safe_load(Path(args.path).read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise ValueError("task group YAML must be a mapping")
+            repository_value = data.get("repository", {})
+            if isinstance(repository_value, dict):
+                repository_value = repository_value.get("path")
+            if not repository_value:
+                raise ValueError("task group repository path is required")
+            items = data.get("tasks")
+            if not isinstance(items, list) or not items:
+                raise ValueError("task group must contain a non-empty tasks list")
+            workspace_mode = WorkspaceMode(data.get("workspace_mode", "project"))
+            specs = [
+                _task_spec(
+                    {
+                        **item,
+                        "repository": repository_value,
+                        "workspace_mode": item.get(
+                            "workspace_mode", workspace_mode.value
+                        ),
+                    }
+                )
+                for item in items
+            ]
+            _json(
+                repository.create_task_group(
+                    title=data["title"],
+                    repository=repository_value,
+                    tasks=specs,
+                    session_mode=SessionMode(data.get("session_mode", "isolated")),
+                    reuse_worktree=workspace_mode != WorkspaceMode.ISOLATED,
+                    sequential=bool(data.get("sequential", True)),
+                    codex_project_id=data.get("codex_project_id"),
+                    origin_thread_id=data.get("origin_thread_id"),
+                )
+            )
         elif args.task_command == "list":
             _json(repository.list_tasks())
         elif args.task_command == "show":
@@ -290,6 +355,10 @@ def dispatch(args: argparse.Namespace) -> int:
             task = repository.get_task(args.task_id)
             if not task.get("worktree_path"):
                 raise ValueError("task has no worktree")
+            if not task.get("workspace_owned"):
+                raise ValueError(
+                    "task uses an existing project workspace; Harbor will not delete it"
+                )
             asyncio.run(
                 WorktreeManager(
                     repository, container.config.data_dir / "worktrees"

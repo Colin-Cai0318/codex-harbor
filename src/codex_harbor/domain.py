@@ -40,6 +40,17 @@ class ThreadRole(StrEnum):
     REVIEW = "REVIEW"
 
 
+class SessionMode(StrEnum):
+    ISOLATED = "isolated"
+    SHARED = "shared"
+
+
+class WorkspaceMode(StrEnum):
+    PROJECT = "project"
+    ISOLATED = "isolated"
+    INHERIT = "inherit"
+
+
 class ErrorType(StrEnum):
     RATE_LIMIT_5H = "RATE_LIMIT_5H"
     RATE_LIMIT_WEEKLY = "RATE_LIMIT_WEEKLY"
@@ -54,6 +65,7 @@ class ErrorType(StrEnum):
     MODEL_CONFIG_INVALID = "MODEL_CONFIG_INVALID"
     REASONING_NOT_SUPPORTED = "REASONING_NOT_SUPPORTED"
     AGENT_FAILURE = "AGENT_FAILURE"
+    UPSTREAM_FAILED = "UPSTREAM_FAILED"
     UNKNOWN = "UNKNOWN"
 
 
@@ -109,7 +121,11 @@ ALLOWED_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
         TaskStatus.FAILED,
         TaskStatus.CANCELLED,
     },
-    TaskStatus.BLOCKED: {TaskStatus.READY, TaskStatus.CANCELLED},
+    TaskStatus.BLOCKED: {
+        TaskStatus.WAIT_DEP,
+        TaskStatus.READY,
+        TaskStatus.CANCELLED,
+    },
     TaskStatus.FAILED: {TaskStatus.READY, TaskStatus.CANCELLED},
     TaskStatus.SUCCEEDED: set(),
     TaskStatus.CANCELLED: {TaskStatus.READY},
@@ -132,6 +148,12 @@ class TaskSpec:
     model: str | None = None
     reasoning_effort: str | None = None
     profile: str | None = None
+    task_group_id: str | None = None
+    codex_project_id: str | None = None
+    origin_thread_id: str | None = None
+    session_parent_task_id: str | None = None
+    reuse_parent_worktree: bool = False
+    workspace_mode: WorkspaceMode = WorkspaceMode.PROJECT
 
 
 @dataclass(slots=True)

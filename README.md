@@ -5,7 +5,8 @@
 ### Durable task orchestration for Codex
 
 Turn Codex sessions into persistent, schedulable coding tasks—with durable state,
-isolated Git worktrees, quota-aware execution, and recovery across processes.
+Codex Project integration, reusable workspaces, quota-aware execution, and
+recovery across processes.
 
 [![CI](https://github.com/Colin-Cai0318/codex-harbor/actions/workflows/ci.yml/badge.svg)](https://github.com/Colin-Cai0318/codex-harbor/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -20,9 +21,9 @@ isolated Git worktrees, quota-aware execution, and recovery across processes.
 ---
 
 Codex Harbor is a local-first control plane built on top of Codex App Server.
-SQLite preserves control-plane state, Git worktrees isolate code changes, and
-recovery envelopes keep task identity independent of a terminal, worker,
-Codex process, or Desktop sidebar.
+SQLite preserves control-plane state, Codex Projects keep threads visible in the
+Desktop app, and recovery envelopes keep task identity independent of a terminal,
+worker, Codex process, or sidebar.
 
 > [!IMPORTANT]
 > Codex Harbor is an MVP. Windows Native is currently beta, and live quota
@@ -54,7 +55,7 @@ long-running and multi-repository work a durable lifecycle:
 | Need | Harbor behavior |
 |---|---|
 | Survive restarts | Persists tasks, attempts, Codex threads, workers, quota, and events in SQLite/WAL |
-| Run safely in parallel | Claims tasks transactionally and gives each task its own Git worktree |
+| Use the same code as Codex | Defaults to the existing Project/conversation workspace; isolated worktrees are opt-in |
 | Respect ordering | Supports dependencies, priority + FIFO ordering, and exclusive groups |
 | Handle quota pauses | Uses separate task and pool state machines with wait, drain, freeze, and resume states |
 | Keep agent choices explicit | Validates model/reasoning capabilities dynamically; never silently falls back |
@@ -74,35 +75,49 @@ flowchart LR
     D --> S[Scheduler + Pool Controller]
     S --> W[Worker Pool]
     W --> AS[Codex App Server]
-    W --> WT[Per-task Git Worktrees]
+    W --> WS[Existing Project Workspace<br/>or opt-in Worktree]
     D --> DB[(SQLite / WAL)]
     W --> DB
 ```
 
 The daemon owns one shared App Server process. Workers retain task-scoped model
-and reasoning configuration, so agent state never leaks between tasks.
+and reasoning configuration. Tasks that write to the same existing workspace
+are automatically serialized even when the global worker limit is greater than one.
 
 ## Task, session, and turn model
 
 Harbor does not replace Codex sessions. It schedules work into durable Codex
-threads created through App Server, so the transcript remains in Codex's own
-thread store and can be recognized in the Codex app as `[T001] Task title`.
-Harbor's dashboard adds lifecycle and quota control; it is not a second chat
-history implementation.
+threads created through App Server and assigns them to the matching Codex
+Project. The transcript remains in Codex's own thread store and is visible in
+the app as `[T001] Task title` or `[G001] Group title`. Harbor's dashboard adds
+lifecycle and quota control; it is not a second chat-history implementation.
 
 | Harbor/Codex object | Meaning | Lifetime |
 |---|---|---|
 | Task | Business objective, repository, prompt, acceptance, dependencies, and scheduling state | Until explicitly deleted |
-| Root Thread | The task's primary Codex session and conversation history | Reused across Worker and App Server restarts |
+| Codex Project | App-owned collection of roots and durable threads | Shared by Codex and Harbor |
+| Root Thread | A durable Codex session and conversation history | One task normally owns it; a task chain may share it |
 | Recovery Thread | A fork/new thread used only if the prior thread cannot be resumed | Linked to the same Task |
 | Turn | One prompt execution inside a Thread | Recorded with its Thread and execution number |
 | Counted failure | A runtime or acceptance failure that consumes the configured retry budget | Separate from the Turn count |
 
-The normal mapping is one Task to one Root Thread, with multiple Turns over
-time. The first Turn receives the full task envelope. Acceptance feedback and
-quota-reset recovery prompts are injected as later Turns in that same Thread.
-Quota exhaustion is recorded as `WAIT_QUOTA`; its Turn remains visible, but it
-does not increment the counted-failure budget.
+The default mapping is one Task to one Root Thread, with multiple Turns over
+time. A shared-session group instead links several ordered Tasks to the same
+Thread: after T001 succeeds, Harbor injects T002's new objective into T001's
+session, preserving its conversation context. Acceptance feedback and
+quota-reset recovery prompts are also injected as later Turns in the same
+Thread. Quota exhaustion is recorded as `WAIT_QUOTA`; its Turn remains visible,
+but it does not increment the counted-failure budget.
+
+```mermaid
+flowchart LR
+    P[Codex Project] --> G[Harbor Task Group]
+    G --> T1[T001]
+    G --> T2[T002 depends on T001]
+    T1 --> S[Shared Codex Thread]
+    T2 --> S
+    S --> W[Existing Project Workspace]
+```
 
 ```mermaid
 flowchart LR
@@ -120,6 +135,11 @@ and live quota availability, then calls `thread/resume` before starting the next
 Turn. It does not create a detached replacement session merely because quota
 was exhausted.
 
+If an upstream task fails terminally, dependent tasks become `BLOCKED` with an
+`UPSTREAM_FAILED` reason. Retrying the upstream task moves its dependants back
+to `WAIT_DEP`; successful completion releases the next prompt. `WAIT_QUOTA` is
+not terminal and therefore does not block the chain permanently.
+
 ## Features
 
 ### Persistent scheduling
@@ -127,8 +147,8 @@ was exhausted.
 - Durable repositories, tasks, dependencies, attempts, threads, workers, quota,
   pool state, and event records.
 - Transactional task admission with priority/FIFO ordering.
-- Dependency gates, exclusive groups, parallel workers, bounded retry, and
-  acceptance-command follow-up.
+- Dependency gates, terminal-failure propagation, shared-session task groups,
+  parallel workers, bounded retry, and acceptance-command follow-up.
 - Independent task states such as `WAIT_QUOTA`, `RETRY_WAIT`, and `BLOCKED`, plus
   pool states such as `DRAINING` and `FROZEN`.
 - A runtime-adjustable, persisted maximum parallel-task limit (1–64).
@@ -136,6 +156,8 @@ was exhausted.
 ### Native Codex integration
 
 - Implements App Server initialization and durable thread/turn operations.
+- Discovers Codex Projects by their root, assigns new threads with `projectId`,
+  and can bind the originating Codex conversation to the same Project.
 - Starts, reads, resumes, and forks Codex threads without relying on internal
   rollout JSONL files.
 - Loads the live model registry and validates reasoning-effort support.
@@ -143,7 +165,8 @@ was exhausted.
 
 ### Isolation, recovery, and observability
 
-- Creates `harbor/<task-id>` branches in Harbor-owned Git worktrees.
+- Uses the originating conversation workspace (or registered repository root)
+  by default; creates `harbor/<task-id>` worktrees only in isolated mode.
 - Supports local Linux, Windows Native, and WSL execution backends.
 - Persists recovery envelopes and detects stale worker heartbeats.
 - Captures task history and command output after redacting authorization,
@@ -191,6 +214,7 @@ uv run harbor task add `
   --title "Improve BossHunter documentation" `
   --prompt "Document installation, startup, and verification without changing application code" `
   --backend windows `
+  --workspace-mode project `
   --reasoning high `
   --accept "git diff --check"
 ```
@@ -247,9 +271,10 @@ The first command should print `True`, the second should identify
 `origin`, `fork`, or anything else; Harbor does not depend on the remote name.
 
 > [!WARNING]
-> A Harbor task worktree starts from the repository's committed `HEAD`.
-> Uncommitted and untracked files in the source checkout are not copied into the
-> task worktree automatically.
+> The default `project` workspace mode operates directly in the existing Codex
+> workspace. Its uncommitted and untracked files are visible to the task, and the
+> task's changes appear there directly. Use `--workspace-mode isolated` only when
+> you intentionally want a separate `harbor/<task-id>` worktree.
 
 ### 2. Register it from the Codex Harbor checkout
 
@@ -311,7 +336,7 @@ uv run harbor ps
 | `repository is not registered` | The task uses another path or another Harbor data directory; rerun `repo add` and inspect `repo list` |
 | `repo list` is still empty | The CLI and daemon may use different `HARBOR_DATA_DIR` or `--config` values; both must use the same configuration |
 | A GitHub URL cannot be registered | This is expected; clone it and register the resulting local directory |
-| Local uncommitted changes are missing | Worktrees start from committed `HEAD`; commit the changes that the task must see |
+| Local uncommitted changes are missing | Confirm the task uses `project` mode; isolated worktrees intentionally start from committed `HEAD` |
 | The dashboard selector has no new repository | Refresh the page; repository options load when the page starts |
 
 ## Configuration
@@ -341,7 +366,9 @@ uv run harbor init
 
 ## Task files
 
-Tasks can be created individually or imported from YAML:
+Tasks can be created individually or imported from YAML. The default
+`workspace_mode: project` uses the registered checkout rather than creating a
+new worktree:
 
 ```bash
 uv run harbor task import docs/task-example.yaml
@@ -365,11 +392,50 @@ acceptance:
   commands:
     - pytest tests/watchdog -q
 max_attempts: 5
+workspace_mode: project
 ```
 
 Lower priority numbers run first; tasks with equal priority use FIFO order.
 `max_attempts` is the counted-failure retry limit; quota-wait Turns do not
 consume it.
+
+### Ordered tasks in one Codex session
+
+From the Codex Harbor plugin/skill or any loopback client, create a task group:
+
+```powershell
+$body = @{
+  title = "Codex Harbor follow-up development"
+  repository = "E:\Tools\Codex_Harbor"
+  session_mode = "shared"
+  workspace_mode = "project"
+  sequential = $true
+  codex_project_id = "<Codex Project ID>"
+  origin_thread_id = "<current Codex conversation ID>"
+  tasks = @(
+    @{ title = "Database"; prompt = "Implement the database changes"; priority = 10; acceptance_commands = @("uv run pytest -q") },
+    @{ title = "Scheduler"; prompt = "Continue in the preceding task's session and implement the scheduler"; priority = 20; acceptance_commands = @("uv run pytest -q") }
+  )
+} | ConvertTo-Json -Depth 6
+
+Invoke-RestMethod -Method Post `
+  -Uri "http://127.0.0.1:8765/api/task-groups" `
+  -ContentType "application/json" -Body $body
+```
+
+`shared` means each later Task reuses the preceding Task's Codex Thread.
+`isolated` gives each Task its own Thread. `project` reuses the existing checkout;
+`isolated` workspace mode creates a Harbor-owned worktree. Sequential groups
+automatically add T002 → T001 dependencies and inject the next prompt only after
+the predecessor succeeds.
+
+The same operation is available as a copyable YAML workflow:
+
+```powershell
+Copy-Item docs\task-group-example.yaml .\my-task-group.yaml
+# Edit the repository, prompts, Project ID, and optional origin Thread ID.
+uv run harbor task group-import .\my-task-group.yaml
+```
 
 ## CLI reference
 
@@ -377,7 +443,7 @@ consume it.
 |---|---|
 | `harbor init` | Create the data directory, database, and default configuration |
 | `harbor repo add\|list` | Register or list eligible Git repositories |
-| `harbor task add\|import\|list\|show` | Create and inspect tasks |
+| `harbor task add\|import\|group-import\|list\|show` | Create individual tasks or an atomic task group, then inspect them |
 | `harbor task config` | Change the task model or reasoning effort |
 | `harbor task retry\|cancel\|cleanup` | Control task lifecycle and owned worktrees |
 | `harbor ps` | Show pool, workers, and active tasks |
@@ -434,6 +500,7 @@ integration gate.
 - [Implementation map](docs/IMPLEMENTATION.md)
 - [Validation record](docs/VALIDATION.md)
 - [Example task](docs/task-example.yaml)
+- [Shared-session task-group example](docs/task-group-example.yaml)
 
 ## Safety boundaries
 
@@ -446,8 +513,8 @@ integration gate.
 - Quota exhaustion is a wait state and recorded Turn, not a counted failure.
 - Unsupported model capabilities block a task instead of changing its model.
 - Codex authentication remains owned by Codex; Harbor does not store its secrets.
-- `task cleanup` validates the registered Git root and removes only the exact
-  Harbor-owned worktree; it preserves the branch.
+- Existing Project workspaces are never removed by `task cleanup`. Cleanup only
+  accepts an exact Harbor-owned isolated worktree and preserves its branch.
 - The API binds to loopback by default and never defaults to `0.0.0.0`.
 
 ## Project status

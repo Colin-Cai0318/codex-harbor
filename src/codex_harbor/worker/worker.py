@@ -15,6 +15,7 @@ from ..domain import (
     RuntimeTurnResult,
     TaskStatus,
     ThreadRole,
+    WorkspaceMode,
 )
 from ..git import GitError, WorktreeManager
 from ..recovery import RecoveryEnvelope, build_recovery_prompt
@@ -91,6 +92,34 @@ Constraints: {constraints}
 """
 
 
+def continuation_prompt(task: dict[str, Any], parent: dict[str, Any]) -> str:
+    acceptance = (
+        "\n".join(f"- {command}" for command in task["acceptance_commands"])
+        or "- No acceptance commands configured"
+    )
+    return f"""Continue the shared Harbor session with a new task.
+
+Previous Task: {parent["id"]} · {parent["title"]} ({parent["status"]})
+New Harbor Task ID: {task["id"]}
+New Task Title: {task["title"]}
+
+Use the preceding conversation as context, but follow the new objective below.
+Do not repeat completed work unless the new objective requires changing it.
+
+New Objective:
+{task["prompt"]}
+
+Description:
+{task.get("description") or "(none)"}
+
+Current workspace:
+{task["worktree_path"]}
+
+Acceptance Criteria:
+{acceptance}
+"""
+
+
 class Worker:
     def __init__(
         self,
@@ -155,7 +184,12 @@ class Worker:
         if not isinstance(self.runtime, CodexAppServerRuntime):
             return
         suffix = " · Recovery" if recovery else ""
-        name = f'[{task["id"]}] {task["title"]}{suffix}'
+        group = task.get("task_group")
+        name = (
+            f'[{group["id"]}] {group["title"]}{suffix}'
+            if group and group.get("session_mode") == "shared"
+            else f'[{task["id"]}] {task["title"]}{suffix}'
+        )
         try:
             await self.runtime.client.thread_set_name(thread_id, name)
         except Exception as error:  # noqa: BLE001 - naming is optional metadata
@@ -186,20 +220,159 @@ class Worker:
         # Avoid a hot loop if account/rateLimits telemetry lags the turn error.
         return (now + timedelta(seconds=60)).isoformat()
 
+    async def _resolve_project(self, task: dict[str, Any]) -> str | None:
+        if not isinstance(self.runtime, CodexAppServerRuntime):
+            return task.get("codex_project_id")
+        project_id = task.get("codex_project_id")
+        if not project_id:
+            registered = next(
+                (
+                    item
+                    for item in self.repository.list_repositories()
+                    if item["path"] == task["repository"]
+                ),
+                None,
+            )
+            project_id = registered.get("codex_project_id") if registered else None
+        if not project_id:
+            try:
+                project = await self.runtime.client.find_project_for_path(
+                    task.get("worktree_path") or task["repository"]
+                )
+                if project is None and task.get("worktree_path"):
+                    project = await self.runtime.client.find_project_for_path(
+                        task["repository"]
+                    )
+                project_id = project.get("id") if project else None
+            except AppServerError as error:
+                self.repository.add_event(
+                    task["id"],
+                    "CODEX_PROJECT_DISCOVERY_FAILED",
+                    {"error": str(error)[-1000:]},
+                )
+                project_id = None
+        if project_id:
+            self.repository.set_repository_project(task["repository"], project_id)
+            self.repository.set_task_project(task["id"], project_id)
+            if task.get("origin_thread_id"):
+                try:
+                    await self.runtime.client.thread_update_metadata(
+                        task["origin_thread_id"], project_id=project_id
+                    )
+                except AppServerError as error:
+                    self.repository.add_event(
+                        task["id"],
+                        "ORIGIN_THREAD_PROJECT_BIND_FAILED",
+                        {"error": str(error)[-1000:]},
+                    )
+        return project_id
+
+    async def _prepare_context_and_workspace(
+        self, task: dict[str, Any]
+    ) -> tuple[dict[str, Any], Path]:
+        parent: dict[str, Any] | None = None
+        if task.get("session_parent_task_id"):
+            parent = self.repository.get_task(task["session_parent_task_id"])
+            if parent["status"] != TaskStatus.SUCCEEDED:
+                raise GitError(
+                    f"session parent {parent['id']} is not successful: {parent['status']}"
+                )
+            parent_thread = (
+                parent.get("threads", [])[-1]["thread_id"]
+                if parent.get("threads")
+                else parent.get("root_thread_id")
+            )
+            if not parent_thread:
+                raise GitError(f"session parent {parent['id']} has no Codex thread")
+            project_id = task.get("codex_project_id") or parent.get(
+                "codex_project_id"
+            )
+            self.repository.link_shared_thread(
+                task["id"], parent_thread, parent["id"], project_id=project_id
+            )
+            task = self.repository.get_task(task["id"])
+
+        mode = WorkspaceMode(task.get("workspace_mode") or WorkspaceMode.PROJECT)
+        if task.get("worktree_path"):
+            if mode == WorkspaceMode.ISOLATED and task.get("workspace_owned"):
+                workspace = await self.worktrees.ensure(
+                    task["id"], task["repository"], task["worktree_path"]
+                )
+            else:
+                workspace = await self.worktrees.use_existing_workspace(
+                    task["repository"], task["worktree_path"]
+                )
+            return task, workspace
+
+        if mode == WorkspaceMode.INHERIT or task.get("reuse_parent_worktree"):
+            if not parent or not parent.get("worktree_path"):
+                raise GitError("inherited workspace requires a prepared parent task")
+            workspace = await self.worktrees.use_existing_workspace(
+                task["repository"], parent["worktree_path"]
+            )
+            self.repository.set_worktree(
+                task["id"],
+                str(workspace),
+                owner_task_id=parent.get("worktree_owner_task_id") or parent["id"],
+                owned=False,
+            )
+        elif mode == WorkspaceMode.PROJECT:
+            candidate = task["repository"]
+            if task.get("origin_thread_id") and isinstance(
+                self.runtime, CodexAppServerRuntime
+            ):
+                try:
+                    inspected = await self.runtime.inspect_thread(
+                        task["origin_thread_id"]
+                    )
+                    origin = inspected.get("thread", inspected)
+                    candidate = origin.get("cwd") or candidate
+                except AppServerError as error:
+                    self.repository.add_event(
+                        task["id"],
+                        "ORIGIN_WORKSPACE_READ_FAILED",
+                        {"error": str(error)[-1000:]},
+                    )
+            workspace = await self.worktrees.use_existing_workspace(
+                task["repository"], candidate
+            )
+            self.repository.set_worktree(task["id"], str(workspace), owned=False)
+        else:
+            workspace = await self.worktrees.ensure(
+                task["id"], task["repository"], None
+            )
+            self.repository.set_worktree(task["id"], str(workspace), owned=True)
+        return self.repository.get_task(task["id"]), workspace
+
     async def _start_or_resume(
         self,
         task: dict[str, Any],
         config: EffectiveAgentConfig,
         worktree: Path,
         envelope: RecoveryEnvelope,
+        project_id: str | None,
     ) -> RuntimeTurnResult:
         threads = task.get("threads", [])
         active_thread = (
             threads[-1]["thread_id"] if threads else task.get("root_thread_id")
         )
         if active_thread:
-            prompt = build_recovery_prompt(envelope)
+            parent = (
+                self.repository.get_task(task["session_parent_task_id"])
+                if task.get("session_parent_task_id")
+                and int(task.get("current_attempt", 0)) == 0
+                else None
+            )
+            prompt = (
+                continuation_prompt(task, parent)
+                if parent
+                else build_recovery_prompt(envelope)
+            )
             try:
+                if project_id and isinstance(self.runtime, CodexAppServerRuntime):
+                    await self.runtime.client.thread_update_metadata(
+                        active_thread, project_id=project_id
+                    )
                 await self._name_thread(task, active_thread)
                 result = await self.runtime.resume_task(
                     active_thread, str(worktree), prompt, config
@@ -226,7 +399,12 @@ class Worker:
                             ThreadRole.RECOVERY,
                             parent_thread_id=active_thread,
                             model=config.effective_model,
+                            project_id=project_id,
                         )
+                        if project_id:
+                            await self.runtime.client.thread_update_metadata(
+                                fork_id, project_id=project_id
+                            )
                         await self._name_thread(task, fork_id, recovery=True)
                         envelope.thread_id = fork_id
                         envelope.write(
@@ -243,6 +421,8 @@ class Worker:
                 model=config.effective_model,
                 approval_policy=self.runtime.approval_policy,
                 sandbox=self.runtime.sandbox,
+                project_id=project_id,
+                runtime_workspace_roots=[str(worktree)],
             )
             thread = started.get("thread", started)
             thread_id = str(thread.get("id") or thread.get("threadId"))
@@ -252,7 +432,11 @@ class Worker:
                 else ThreadRole.RECOVERY
             )
             self.repository.set_thread(
-                task["id"], thread_id, role, model=config.effective_model
+                task["id"],
+                thread_id,
+                role,
+                model=config.effective_model,
+                project_id=project_id,
             )
             await self._name_thread(
                 task, thread_id, recovery=role == ThreadRole.RECOVERY
@@ -343,9 +527,7 @@ class Worker:
                 )
                 return
             try:
-                worktree = await self.worktrees.ensure(
-                    task["id"], task["repository"], task.get("worktree_path")
-                )
+                task, worktree = await self._prepare_context_and_workspace(task)
             except GitError as error:
                 self.repository.transition(
                     task["id"], TaskStatus.BLOCKED, reason=ErrorType.GIT
@@ -354,7 +536,8 @@ class Worker:
                     task["id"], "TASK_FAILED", {"error": str(error)}
                 )
                 return
-            self.repository.set_worktree(task["id"], str(worktree))
+            task = self.repository.get_task(task["id"])
+            project_id = await self._resolve_project(task)
             task = self.repository.get_task(task["id"])
             head = await self.worktrees.head(worktree)
             envelope = self._save_envelope(
@@ -373,7 +556,7 @@ class Worker:
                 try:
                     if first_turn_in_worker or task.get("root_thread_id") is None:
                         result = await self._start_or_resume(
-                            task, config, worktree, envelope
+                            task, config, worktree, envelope, project_id
                         )
                     else:
                         thread_id = task.get("threads", [])[-1]["thread_id"]

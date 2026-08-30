@@ -243,18 +243,24 @@ class AppServerClient:
         model: str | None = None,
         approval_policy: str = "never",
         sandbox: str = "workspace-write",
+        project_id: str | None = None,
+        runtime_workspace_roots: list[str] | None = None,
     ) -> dict[str, Any]:
-        return await self.request(
-            "thread/start",
-            {
-                "cwd": str(Path(cwd).resolve()),
-                "model": model,
-                "approvalPolicy": approval_policy,
-                "sandbox": sandbox,
-                "ephemeral": False,
-                "threadSource": "codex-harbor",
-            },
-        )
+        params: dict[str, Any] = {
+            "cwd": str(Path(cwd).resolve()),
+            "model": model,
+            "approvalPolicy": approval_policy,
+            "sandbox": sandbox,
+            "ephemeral": False,
+            "threadSource": "codex-harbor",
+        }
+        if project_id:
+            params["projectId"] = project_id
+        if runtime_workspace_roots:
+            params["runtimeWorkspaceRoots"] = [
+                str(Path(path).resolve()) for path in runtime_workspace_roots
+            ]
+        return await self.request("thread/start", params)
 
     async def thread_resume(
         self, thread_id: str, *, cwd: str | None = None, model: str | None = None
@@ -277,6 +283,36 @@ class AppServerClient:
         return await self.request(
             "thread/name/set", {"threadId": thread_id, "name": name}
         )
+
+    async def thread_update_metadata(
+        self, thread_id: str, *, project_id: str | None = None
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"threadId": thread_id}
+        if project_id is not None:
+            params["projectId"] = project_id
+        return await self.request("thread/metadata/update", params)
+
+    async def project_list(self) -> list[dict[str, Any]]:
+        projects: list[dict[str, Any]] = []
+        cursor: str | None = None
+        while True:
+            result = await self.request(
+                "project/list", {"cursor": cursor, "limit": 100}
+            )
+            projects.extend(result.get("data", []))
+            cursor = result.get("nextCursor")
+            if not cursor:
+                return projects
+
+    async def find_project_for_path(
+        self, path: str | Path
+    ) -> dict[str, Any] | None:
+        target = str(Path(path).expanduser().resolve()).casefold()
+        for project in await self.project_list():
+            for root in project.get("roots", []):
+                if str(Path(root["path"]).expanduser().resolve()).casefold() == target:
+                    return project
+        return None
 
     async def thread_fork(
         self, thread_id: str, *, cwd: str | None = None, model: str | None = None

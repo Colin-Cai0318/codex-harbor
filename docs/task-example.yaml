@@ -18,3 +18,4 @@ acceptance:
   commands:
     - pytest tests/watchdog -q
 max_attempts: 5
+workspace_mode: project

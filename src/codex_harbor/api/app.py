@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from ..domain import PoolStatus, TaskSpec
+from ..domain import PoolStatus, SessionMode, TaskSpec, WorkspaceMode
 from ..storage import HarborRepository
 from .dashboard import DASHBOARD
 
@@ -26,6 +26,38 @@ class TaskCreate(BaseModel):
     model: str | None = None
     reasoning_effort: str | None = None
     profile: str | None = None
+    codex_project_id: str | None = None
+    origin_thread_id: str | None = None
+    session_parent_task_id: str | None = None
+    reuse_parent_worktree: bool = False
+    workspace_mode: WorkspaceMode = WorkspaceMode.PROJECT
+
+
+class TaskGroupItem(BaseModel):
+    id: str | None = None
+    title: str
+    prompt: str
+    description: str = ""
+    execution_backend: str = "local"
+    priority: int = 100
+    depends_on: list[str] = Field(default_factory=list)
+    exclusive_group: str | None = None
+    acceptance_commands: list[str] = Field(default_factory=list)
+    max_attempts: int = 5
+    model: str | None = None
+    reasoning_effort: str | None = None
+    profile: str | None = None
+
+
+class TaskGroupCreate(BaseModel):
+    title: str
+    repository: str
+    tasks: list[TaskGroupItem] = Field(min_length=1)
+    session_mode: SessionMode = SessionMode.ISOLATED
+    workspace_mode: WorkspaceMode = WorkspaceMode.PROJECT
+    sequential: bool = True
+    codex_project_id: str | None = None
+    origin_thread_id: str | None = None
 
 
 class TaskPatch(BaseModel):
@@ -47,6 +79,7 @@ def create_app(
     *,
     model_registry: Any = None,
     profiles: dict[str, dict[str, Any]] | None = None,
+    app_server_client: Any = None,
 ) -> FastAPI:
     app = FastAPI(title="Codex Harbor", version="0.1.0")
     configured_profiles = profiles or {}
@@ -98,9 +131,63 @@ def create_app(
                     model=body.model,
                     reasoning_effort=body.reasoning_effort,
                     profile=body.profile,
+                    codex_project_id=body.codex_project_id,
+                    origin_thread_id=body.origin_thread_id,
+                    session_parent_task_id=body.session_parent_task_id,
+                    reuse_parent_worktree=body.reuse_parent_worktree,
+                    workspace_mode=body.workspace_mode,
                 )
             )
         )
+
+    @app.get("/api/task-groups")
+    async def list_task_groups() -> list[dict[str, Any]]:
+        return repository.list_task_groups()
+
+    @app.get("/api/task-groups/{group_id}")
+    async def get_task_group(group_id: str) -> dict[str, Any]:
+        return guard(lambda: repository.get_task_group(group_id))
+
+    @app.post("/api/task-groups", status_code=201)
+    async def create_task_group(body: TaskGroupCreate) -> dict[str, Any]:
+        reuse_worktree = body.workspace_mode != WorkspaceMode.ISOLATED
+        return guard(
+            lambda: repository.create_task_group(
+                title=body.title,
+                repository=body.repository,
+                tasks=[
+                    TaskSpec(
+                        task_id=item.id,
+                        title=item.title,
+                        repository=body.repository,
+                        prompt=item.prompt,
+                        description=item.description,
+                        execution_backend=item.execution_backend,
+                        priority=item.priority,
+                        depends_on=item.depends_on,
+                        exclusive_group=item.exclusive_group,
+                        acceptance_commands=item.acceptance_commands,
+                        max_attempts=item.max_attempts,
+                        model=item.model,
+                        reasoning_effort=item.reasoning_effort,
+                        profile=item.profile,
+                        workspace_mode=body.workspace_mode,
+                    )
+                    for item in body.tasks
+                ],
+                session_mode=body.session_mode,
+                reuse_worktree=reuse_worktree,
+                sequential=body.sequential,
+                codex_project_id=body.codex_project_id,
+                origin_thread_id=body.origin_thread_id,
+            )
+        )
+
+    @app.get("/api/codex/projects")
+    async def codex_projects() -> list[dict[str, Any]]:
+        if app_server_client is None:
+            return []
+        return await app_server_client.project_list()
 
     @app.patch("/api/tasks/{task_id}")
     @app.patch("/api/tasks/{task_id}/agent")

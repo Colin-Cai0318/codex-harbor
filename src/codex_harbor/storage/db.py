@@ -13,7 +13,20 @@ CREATE TABLE IF NOT EXISTS schema_version (
 CREATE TABLE IF NOT EXISTS repositories (
     path TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    added_at TEXT NOT NULL
+    added_at TEXT NOT NULL,
+    codex_project_id TEXT
+);
+CREATE TABLE IF NOT EXISTS task_groups (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    repository TEXT NOT NULL REFERENCES repositories(path),
+    codex_project_id TEXT,
+    origin_thread_id TEXT,
+    session_mode TEXT NOT NULL DEFAULT 'isolated',
+    reuse_worktree INTEGER NOT NULL DEFAULT 0,
+    failure_policy TEXT NOT NULL DEFAULT 'block_following',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
@@ -44,7 +57,15 @@ CREATE TABLE IF NOT EXISTS tasks (
     grandfathered INTEGER NOT NULL DEFAULT 0,
     drain_generation TEXT,
     exclusive_group TEXT,
-    claimed_by TEXT
+    claimed_by TEXT,
+    task_group_id TEXT,
+    codex_project_id TEXT,
+    origin_thread_id TEXT,
+    session_parent_task_id TEXT,
+    reuse_parent_worktree INTEGER NOT NULL DEFAULT 0,
+    worktree_owner_task_id TEXT,
+    workspace_mode TEXT NOT NULL DEFAULT 'project',
+    workspace_owned INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_schedule ON tasks(status, priority, created_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_group ON tasks(exclusive_group, status);
@@ -55,8 +76,17 @@ CREATE TABLE IF NOT EXISTS codex_threads (
     parent_thread_id TEXT,
     state TEXT,
     model TEXT,
+    project_id TEXT,
     created_at TEXT NOT NULL,
     last_used_at TEXT
+);
+CREATE TABLE IF NOT EXISTS task_thread_links (
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL REFERENCES codex_threads(thread_id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    inherited_from_task_id TEXT,
+    linked_at TEXT NOT NULL,
+    PRIMARY KEY(task_id, thread_id)
 );
 CREATE TABLE IF NOT EXISTS attempts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -175,6 +205,37 @@ class Database:
                 connection.execute(
                     "ALTER TABLE tasks ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0"
                 )
+            task_v4_columns = {
+                "task_group_id": "TEXT",
+                "codex_project_id": "TEXT",
+                "origin_thread_id": "TEXT",
+                "session_parent_task_id": "TEXT",
+                "reuse_parent_worktree": "INTEGER NOT NULL DEFAULT 0",
+                "worktree_owner_task_id": "TEXT",
+                "workspace_mode": "TEXT NOT NULL DEFAULT 'project'",
+                "workspace_owned": "INTEGER NOT NULL DEFAULT 0",
+            }
+            for column, declaration in task_v4_columns.items():
+                if column not in task_columns:
+                    connection.execute(
+                        f"ALTER TABLE tasks ADD COLUMN {column} {declaration}"
+                    )
+            repository_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(repositories)")
+            }
+            if "codex_project_id" not in repository_columns:
+                connection.execute(
+                    "ALTER TABLE repositories ADD COLUMN codex_project_id TEXT"
+                )
+            thread_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(codex_threads)")
+            }
+            if "project_id" not in thread_columns:
+                connection.execute(
+                    "ALTER TABLE codex_threads ADD COLUMN project_id TEXT"
+                )
             attempt_columns = {
                 row["name"]
                 for row in connection.execute("PRAGMA table_info(attempts)")
@@ -255,6 +316,30 @@ class Database:
                     )
                 connection.execute(
                     "INSERT INTO schema_version(version, applied_at) VALUES(3, ?)",
+                    (now,),
+                )
+            version_four = connection.execute(
+                "SELECT 1 FROM schema_version WHERE version=4"
+            ).fetchone()
+            if version_four is None:
+                connection.execute(
+                    """INSERT OR IGNORE INTO task_thread_links(
+                           task_id, thread_id, role, inherited_from_task_id, linked_at
+                       )
+                       SELECT task_id, thread_id, role, NULL, created_at
+                       FROM codex_threads"""
+                )
+                connection.execute(
+                    """UPDATE tasks SET worktree_owner_task_id=id
+                       WHERE worktree_path IS NOT NULL
+                         AND worktree_owner_task_id IS NULL"""
+                )
+                connection.execute(
+                    """UPDATE tasks SET workspace_mode='isolated', workspace_owned=1
+                       WHERE worktree_path IS NOT NULL"""
+                )
+                connection.execute(
+                    "INSERT INTO schema_version(version, applied_at) VALUES(4, ?)",
                     (now,),
                 )
             connection.execute(

@@ -7,7 +7,7 @@ This document maps the product specification to implemented code and verificatio
 | Phase | Implementation | Verification |
 |---|---|---|
 | 0 App Server PoC | `tools/app_server_poc.py`, async stdio client | Real two-process start/turn/resume/read/turn proof; output JSON is retained locally |
-| 1 Persistent core | config, SQLite migrations, state machines, event store, CLI; v3 separates execution turns from counted failures and repairs historical `usageLimitExceeded` failures | storage/state/API and migration tests |
+| 1 Persistent core | config, SQLite migrations, state machines, event store, CLI; v3 separates execution turns from counted failures and repairs historical `usageLimitExceeded` failures; v4 adds task groups, Codex Projects, shared Thread links, and workspace ownership | storage/state/API and migration tests |
 | 2 Codex runtime | v2 handshake and thread/turn/model methods | mocked protocol tests plus Phase 0 |
 | 3 Single worker | transactional claim, heartbeat, attempts, logs/events, runtime-adjustable persisted parallelism | worker and persistence integration tests |
 | 4 Recovery | envelope, stale worker, resume/fork/recovery-thread flow; every newly claimed Worker resumes its durable Thread before starting a Turn | recovery and quota-resume integration tests |
@@ -15,13 +15,14 @@ This document maps the product specification to implemented code and verificatio
 | 6 Real quota | `account/rateLimits/read` structured provider | live `doctor`/daemon, schema-grounded parsing |
 | 7 Weekly freeze | window identity comparison, draining generation, grandfathered set | pool controller tests |
 | 8 Model/reasoning | live registry, profiles, overrides, pending next-turn values, attempt audit | registry and worker tests |
-| 9 Dependency/worktree | dependency gate, priority/FIFO, exclusive groups, per-task Git worktree | real temporary Git repositories |
+| 9 Dependency/workspace | dependency gate, terminal failure propagation, priority/FIFO, automatic same-workspace serialization, existing Project workspaces, and opt-in per-task Git worktrees | real temporary Git repositories and shared-workspace integration tests |
 | 10 Acceptance | command runner, timeout, output capture, follow-up turn | acceptance and worker tests |
 | 11 Linux/WSL2 | isolated execution backends | selection/unit coverage; full host matrix remains release validation |
 | 12 Windows Native | executable resolution, paths, process tree, file-lock-safe SQLite | current Windows test run; remains beta |
 | 13 Local API | loopback FastAPI endpoints | HTTP integration tests |
 | 14 Dashboard | card-based lifecycle board with light/dark themes, persistent English/Simplified Chinese selection, and remaining-first quota cards consuming only Local API | HTTP/API tests, emitted-JavaScript parser test, Edge visual QA |
 | 15 Skill/plugin | Development plugin and `harbor-tasks` skill under `integrations/plugins/codex-harbor` | plugin/skill validation plus loopback API helper smoke test |
+| 16 Project/task groups | Codex Project discovery and metadata assignment, atomic sequential groups, isolated/shared Session policy, many-to-many Task↔Thread links, and continuation prompt injection | generated-schema checks, live Project/list metadata proof, API/storage/Worker integration tests |
 
 ## Important implementation choices
 
@@ -33,11 +34,13 @@ The daemon owns one App Server process and shares it across workers. Each task o
 
 `tasks.current_attempt` is the monotonic execution sequence retained for schema compatibility. Each execution record may carry a Codex `thread_id` and `turn_id`. `tasks.failure_count` is the independent bounded-retry budget. A quota-limited Turn is stored with result `WAIT_QUOTA` and a rate-limit error type, but does not increment `failure_count`.
 
-The normal relationship is Task 1:1 Root Thread and Thread 1:N Turns. A Task may have additional Recovery/Fork Threads only when the active Thread cannot be resumed. Root and recovery threads are durable/non-ephemeral Codex threads, named `[task-id] title`, and remain in Codex's thread store. SQLite remains authoritative for scheduling; Codex remains authoritative for the conversation transcript.
+The default relationship is Task 1:1 Root Thread and Thread 1:N Turns. A shared-session task group deliberately makes Task:N ↔ Thread:1: after each predecessor succeeds, the successor links the same durable Thread and injects a continuation prompt containing the new objective. A Task may have additional Recovery/Fork Threads only when the active Thread cannot be resumed. Root and recovery threads are durable/non-ephemeral Codex threads, named `[task-id] title` or `[group-id] title`, assigned to the matching Codex Project, and retained in Codex's thread store. SQLite remains authoritative for scheduling; Codex remains authoritative for the conversation transcript.
 
 On a rate-limit error, the worker persists the Turn evidence and sets `resume_at` from the matching quota window reset (with a short anti-hot-loop fallback). The scheduler releases the task only after both `resume_at` has passed and all required quota windows are available. A fresh Worker always calls `thread/resume` before its first new Turn, including when `current_attempt` is greater than one.
 
-Worktree cleanup is explicit. Success preserves both worktree and branch. Automatic merge is intentionally out of scope.
+The default `project` workspace is the existing originating conversation cwd when it belongs to the registered repository's Git common directory; otherwise it is the registered repository root. Tasks sharing it receive an automatic exclusive group. Harbor records that it does not own this workspace, so cleanup refuses it. `isolated` mode remains available for a Harbor-owned task worktree; success preserves both worktree and branch. Existing legacy worktree tasks are not relocated, which protects their uncommitted state. Automatic merge is intentionally out of scope.
+
+For dependencies, `WAIT_QUOTA` remains a nonterminal pause and resumes the same Thread after the reset gate opens. A terminal upstream `FAILED`, `BLOCKED`, or `CANCELLED` state changes dependants to `BLOCKED` with `UPSTREAM_FAILED`. Retrying that upstream returns dependants to `WAIT_DEP`, and its eventual success releases them in dependency order.
 
 ## Release boundaries
 
