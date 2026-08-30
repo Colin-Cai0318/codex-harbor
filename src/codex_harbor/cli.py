@@ -203,7 +203,7 @@ def _print_ps(container: ApplicationContainer) -> None:
     quotas = {item["quota_type"]: item for item in container.repository.list_quotas()}
     print("CODEX HARBOR\n")
     print(
-        f"Pool: {pool['state']}    Workers: {len(workers)} / {container.config.section('scheduler')['max_workers']}"
+        f"Pool: {pool['state']}    Workers: {len(workers)} / {pool['max_workers']}"
     )
     for name in ("PRIMARY_5H", "WEEKLY"):
         quota = quotas.get(name, {})

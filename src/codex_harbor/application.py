@@ -22,6 +22,7 @@ class ApplicationContainer:
             freeze_on_weekly_reset=bool(
                 config.section("quota")["freeze_on_weekly_reset"]
             ),
+            max_workers=int(config.section("scheduler")["max_workers"]),
             now=utc_now(),
         )
         return cls(config, database, HarborRepository(database))

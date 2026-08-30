@@ -88,6 +88,7 @@ Daemon 统一管理一个 App Server 进程。模型和推理等级配置始终�
 - 支持依赖门禁、互斥组、并行 Worker、有限重试和验收失败后的后续 Turn。
 - 提供 `WAIT_QUOTA`、`RETRY_WAIT`、`BLOCKED` 等任务状态，以及
   `DRAINING`、`FROZEN` 等独立资源池状态。
+- 支持在运行时调整并持久化最大并行任务数（1–64）。
 
 ### 原生 Codex 集成
 
@@ -102,8 +103,8 @@ Daemon 统一管理一个 App Server 进程。模型和推理等级配置始终�
 - 支持本地 Linux、Windows Native 和 WSL 执行后端。
 - 保存恢复信封，并根据心跳识别失联 Worker。
 - 持久化任务历史和命令输出前，对 Authorization、API Key、Cookie 和密码脱敏。
-- 提供仅监听回环地址的 FastAPI 服务，以及支持白天/黑夜主题的卡片式生命周期
-  Dashboard。
+- 提供仅监听回环地址的 FastAPI 服务，以及支持白天/黑夜主题和中英文持久化切换的
+  卡片式生命周期 Dashboard；额度卡片以剩余额度为主信息。
 
 ## 环境要求
 
@@ -176,6 +177,9 @@ uv run harbor history T001
 | `quota.freeze_on_weekly_reset` | `true` | 周配额重置时先排空既有任务再冻结资源池 |
 | `codex.approval_policy` | `never` | 防止无人值守 Worker 卡在审批提示上 |
 | `codex.sandbox` | `workspace-write` | 将 Agent 写入限制在任务工作区 |
+
+`scheduler.max_workers` 用于初始化新数据库；初始化后可在 Dashboard 中实时修改，
+新值会保存在 Harbor 数据库中。
 
 测试另一套 Harbor 实例时，可使用独立数据目录：
 

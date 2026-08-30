@@ -92,7 +92,7 @@ class Scheduler:
         pool = self.repository.get_pool()
         if pool["state"] not in {PoolStatus.RUNNING, PoolStatus.DRAINING}:
             return
-        max_workers = int(self.config["scheduler"]["max_workers"])
+        max_workers = int(pool["max_workers"])
         slots = max(0, max_workers - len(self.running))
         for _ in range(slots):
             worker_id = f"worker-{len(self.running) + 1}-{id(self):x}"

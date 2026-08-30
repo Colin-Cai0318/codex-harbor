@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS pool_state (
     id INTEGER PRIMARY KEY CHECK(id = 1),
     state TEXT NOT NULL,
     freeze_on_weekly_reset INTEGER NOT NULL DEFAULT 0,
+    max_workers INTEGER NOT NULL DEFAULT 3,
     drain_generation TEXT,
     freeze_triggered_at TEXT,
     last_weekly_window TEXT,
@@ -147,7 +148,14 @@ class Database:
         connection.execute("PRAGMA busy_timeout = 30000")
         return connection
 
-    def migrate(self, *, freeze_on_weekly_reset: bool = True, now: str) -> None:
+    def migrate(
+        self,
+        *,
+        freeze_on_weekly_reset: bool = True,
+        max_workers: int = 3,
+        now: str,
+    ) -> None:
+        max_workers = max(1, min(64, int(max_workers)))
         with self.connect() as connection:
             connection.executescript(SCHEMA)
             task_columns = {
@@ -161,15 +169,30 @@ class Database:
                 connection.execute(
                     "ALTER TABLE tasks ADD COLUMN pending_reasoning_set INTEGER NOT NULL DEFAULT 0"
                 )
+            pool_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(pool_state)")
+            }
+            if "max_workers" not in pool_columns:
+                connection.execute(
+                    "ALTER TABLE pool_state ADD COLUMN max_workers INTEGER NOT NULL DEFAULT 3"
+                )
+                connection.execute(
+                    "UPDATE pool_state SET max_workers=? WHERE id=1", (max_workers,)
+                )
             connection.execute(
                 "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES(1, ?)",
                 (now,),
             )
             connection.execute(
+                "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES(2, ?)",
+                (now,),
+            )
+            connection.execute(
                 """INSERT OR IGNORE INTO pool_state(
-                    id, state, freeze_on_weekly_reset, updated_at
-                ) VALUES(1, 'RUNNING', ?, ?)""",
-                (int(freeze_on_weekly_reset), now),
+                    id, state, freeze_on_weekly_reset, max_workers, updated_at
+                ) VALUES(1, 'RUNNING', ?, ?, ?)""",
+                (int(freeze_on_weekly_reset), max_workers, now),
             )
 
     @contextmanager

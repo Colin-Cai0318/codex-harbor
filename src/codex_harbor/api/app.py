@@ -34,7 +34,8 @@ class TaskPatch(BaseModel):
 
 
 class PoolPatch(BaseModel):
-    freeze_on_weekly_reset: bool
+    freeze_on_weekly_reset: bool | None = None
+    max_workers: int | None = Field(default=None, ge=1, le=64)
 
 
 class RepositoryCreate(BaseModel):
@@ -45,7 +46,6 @@ def create_app(
     repository: HarborRepository,
     *,
     model_registry: Any = None,
-    max_workers: int = 3,
     profiles: dict[str, dict[str, Any]] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Codex Harbor", version="0.1.0")
@@ -126,12 +126,15 @@ def create_app(
 
     @app.get("/api/pool")
     async def get_pool() -> dict[str, Any]:
-        return {**repository.get_pool(), "max_workers": max_workers}
+        return repository.get_pool()
 
     @app.patch("/api/pool")
     async def patch_pool(body: PoolPatch) -> dict[str, Any]:
-        repository.set_freeze_on_weekly_reset(body.freeze_on_weekly_reset)
-        return {**repository.get_pool(), "max_workers": max_workers}
+        if body.freeze_on_weekly_reset is not None:
+            repository.set_freeze_on_weekly_reset(body.freeze_on_weekly_reset)
+        if body.max_workers is not None:
+            repository.set_max_workers(body.max_workers)
+        return repository.get_pool()
 
     @app.post("/api/pool/{action}")
     async def pool_action(action: str) -> dict[str, Any]:
@@ -143,7 +146,7 @@ def create_app(
         if action not in states:
             raise HTTPException(404, "unknown pool action")
         repository.set_pool(states[action], event_type=f"POOL_{action.upper()}D")
-        return {**repository.get_pool(), "max_workers": max_workers}
+        return repository.get_pool()
 
     @app.get("/api/quota")
     async def quota() -> list[dict[str, Any]]:

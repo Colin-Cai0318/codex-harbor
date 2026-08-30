@@ -9,7 +9,7 @@ This document maps the product specification to implemented code and verificatio
 | 0 App Server PoC | `tools/app_server_poc.py`, async stdio client | Real two-process start/turn/resume/read/turn proof; output JSON is retained locally |
 | 1 Persistent core | config, SQLite migration, state machines, event store, CLI | storage/state/API tests |
 | 2 Codex runtime | v2 handshake and thread/turn/model methods | mocked protocol tests plus Phase 0 |
-| 3 Single worker | transactional claim, heartbeat, attempts, logs/events | worker integration tests |
+| 3 Single worker | transactional claim, heartbeat, attempts, logs/events, runtime-adjustable persisted parallelism | worker and persistence integration tests |
 | 4 Recovery | envelope, stale worker, resume/fork/recovery-thread flow | recovery unit/integration tests |
 | 5 Fake quota | injectable `FakeQuotaProvider` | quota transition tests |
 | 6 Real quota | `account/rateLimits/read` structured provider | live `doctor`/daemon, schema-grounded parsing |
@@ -20,7 +20,7 @@ This document maps the product specification to implemented code and verificatio
 | 11 Linux/WSL2 | isolated execution backends | selection/unit coverage; full host matrix remains release validation |
 | 12 Windows Native | executable resolution, paths, process tree, file-lock-safe SQLite | current Windows test run; remains beta |
 | 13 Local API | loopback FastAPI endpoints | HTTP integration tests |
-| 14 Dashboard | card-based lifecycle board with light/dark themes consuming only Local API | HTTP/API tests, emitted-JavaScript parser test, Edge visual QA |
+| 14 Dashboard | card-based lifecycle board with light/dark themes, persistent English/Simplified Chinese selection, and remaining-first quota cards consuming only Local API | HTTP/API tests, emitted-JavaScript parser test, Edge visual QA |
 | 15 Skill/plugin | Development plugin and `harbor-tasks` skill under `integrations/plugins/codex-harbor` | plugin/skill validation plus loopback API helper smoke test |
 
 ## Important implementation choices

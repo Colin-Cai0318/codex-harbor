@@ -11,7 +11,6 @@ def test_api_and_dashboard(repository, git_repo):
     client = TestClient(
         create_app(
             repository,
-            max_workers=7,
             profiles={"deep_debug": {"reasoning_effort": "high"}},
         )
     )
@@ -30,12 +29,18 @@ def test_api_and_dashboard(repository, git_repo):
     assert dashboard.status_code == 200
     assert "Codex Harbor" in dashboard.text
     assert "data-theme" in dashboard.text
+    assert 'id="languageSelect"' in dashboard.text
+    assert "简体中文" in dashboard.text
+    assert "harbor-language" in dashboard.text
+    assert "剩余 {value}%" in dashboard.text
+    assert "quota?.remaining" in dashboard.text
+    assert 'id="maxWorkersInput"' in dashboard.text
     assert "split('\\n')" in dashboard.text
     task = client.get(f"/api/tasks/{task_id}").json()
     assert task["title"] == "API task"
     assert task["latest_attempt"] is None
     assert task["worker"] is None
-    assert client.get("/api/pool").json()["max_workers"] == 7
+    assert client.get("/api/pool").json()["max_workers"] == 3
     assert client.get("/api/profiles").json() == [
         {"name": "deep_debug", "reasoning_effort": "high"}
     ]
@@ -45,6 +50,9 @@ def test_api_and_dashboard(repository, git_repo):
         ).json()["freeze_on_weekly_reset"]
         == 0
     )
+    assert client.patch("/api/pool", json={"max_workers": 7}).json()["max_workers"] == 7
+    assert client.get("/api/pool").json()["max_workers"] == 7
+    assert client.patch("/api/pool", json={"max_workers": 0}).status_code == 422
     assert client.post("/api/pool/pause").json()["state"] == "PAUSED"
     assert client.post("/api/pool/resume").json()["state"] == "RUNNING"
 

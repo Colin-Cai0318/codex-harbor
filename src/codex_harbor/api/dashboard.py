@@ -101,6 +101,7 @@ DASHBOARD = r"""<!doctype html>
     }
     [data-theme="dark"] .brandmark { color: #171716; background: #f3f3ef; }
     .app-actions { display: flex; align-items: center; gap: 8px; }
+    .language-select { width: auto; min-width: 96px; height: 36px; padding: 6px 28px 6px 9px; font-size: 12px; }
     .page { max-width: 1680px; margin: 0 auto; padding: 28px 24px 48px; }
     .hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
     h1, h2, h3, p { margin-top: 0; }
@@ -133,6 +134,9 @@ DASHBOARD = r"""<!doctype html>
     .metric-head { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 12px; }
     .metric-value { margin-top: 7px; font-size: 24px; line-height: 1.1; font-weight: 620; letter-spacing: -.03em; }
     .metric-sub { margin-top: 7px; color: var(--faint); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .capacity-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 7px; color: var(--faint); font-size: 11px; }
+    .capacity-control { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+    .capacity-control input { width: 58px; height: 30px; padding: 4px 7px; text-align: center; font-size: 12px; }
     .progress { height: 5px; margin-top: 13px; overflow: hidden; border-radius: 999px; background: var(--surface-soft); }
     .progress > i { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--accent); transition: width .25s ease; }
     .toolbar {
@@ -270,50 +274,52 @@ DASHBOARD = r"""<!doctype html>
     <header class="appbar">
       <div class="brand"><span class="brandmark">⌁</span><span>Codex Harbor</span></div>
       <div class="app-actions">
-        <span id="lastUpdated" class="updated">Connecting…</span>
+        <span id="lastUpdated" class="updated" data-i18n="runtime.connecting">Connecting…</span>
+        <label class="sr-only" for="languageSelect" data-i18n="language.label">Language</label>
+        <select id="languageSelect" class="language-select" aria-label="Language"><option value="en">English</option><option value="zh-CN">简体中文</option></select>
         <button id="themeToggle" class="icon-btn" type="button" aria-label="Switch theme" title="Switch theme">◐</button>
       </div>
     </header>
 
     <main class="page">
       <section class="hero">
-        <div><h1>Task board</h1><p>Persistent Codex work, organized by lifecycle and kept safe across processes.</p></div>
+        <div><h1 data-i18n="hero.title">Task board</h1><p data-i18n="hero.subtitle">Persistent Codex work, organized by lifecycle and kept safe across processes.</p></div>
         <span id="poolPill" class="pool-pill" data-state="LOADING">LOADING</span>
       </section>
 
       <div id="errorNotice" class="notice" role="alert"></div>
       <div id="poolNotice" class="notice" role="status"></div>
 
-      <section class="metrics" aria-label="Runtime overview">
+      <section class="metrics" aria-label="Runtime overview" data-i18n-aria-label="metrics.label">
         <article class="metric-card">
-          <div class="metric-head"><span>Workers</span><span id="workerState">Idle</span></div>
+          <div class="metric-head"><span data-i18n="metrics.workers">Workers</span><span id="workerState">Idle</span></div>
           <div id="workers" class="metric-value">—</div>
-          <div class="metric-sub">Active scheduler capacity</div>
+          <div class="capacity-row"><span data-i18n="metrics.capacity">Active scheduler capacity</span><label class="capacity-control"><span data-i18n="metrics.maxParallel">Max parallel</span><input id="maxWorkersInput" type="number" min="1" max="64" value="3" aria-label="Maximum parallel tasks" data-i18n-aria-label="metrics.maxParallelTasks"></label></div>
         </article>
         <article class="metric-card">
-          <div class="metric-head"><span>5-hour usage</span><span id="fiveAvailability">Checking</span></div>
+          <div class="metric-head"><span data-i18n="metrics.fiveHour">5-hour usage</span><span id="fiveAvailability" data-i18n="quota.checking">Checking</span></div>
           <div id="five" class="metric-value">—</div>
           <div class="progress"><i id="fivebar"></i></div>
-          <div id="fiveReset" class="metric-sub">Reset time unavailable</div>
+          <div id="fiveReset" class="metric-sub" data-i18n="quota.resetUnavailable">Reset time unavailable</div>
         </article>
         <article class="metric-card">
-          <div class="metric-head"><span>Weekly usage</span><span id="weekAvailability">Checking</span></div>
+          <div class="metric-head"><span data-i18n="metrics.weekly">Weekly usage</span><span id="weekAvailability" data-i18n="quota.checking">Checking</span></div>
           <div id="weekly" class="metric-value">—</div>
           <div class="progress"><i id="weekbar"></i></div>
-          <div id="weekReset" class="metric-sub">Reset time unavailable</div>
+          <div id="weekReset" class="metric-sub" data-i18n="quota.resetUnavailable">Reset time unavailable</div>
         </article>
       </section>
 
       <section class="toolbar" aria-label="Board controls">
         <div class="toolbar-left">
-          <label class="search"><span>⌕</span><span class="sr-only">Search tasks</span><input id="searchInput" type="search" placeholder="Search tasks"></label>
-          <button id="newTaskButton" class="btn primary" type="button">＋ New task</button>
+          <label class="search"><span>⌕</span><span class="sr-only" data-i18n="board.search">Search tasks</span><input id="searchInput" type="search" placeholder="Search tasks" data-i18n-placeholder="board.search"></label>
+          <button id="newTaskButton" class="btn primary" type="button" data-i18n="board.newTask">＋ New task</button>
         </div>
         <div class="toolbar-right">
-          <label class="switch-label"><input id="weeklyFreeze" type="checkbox"><span>Freeze on weekly reset</span></label>
-          <button class="btn pool-action" data-action="pause" type="button">Pause</button>
-          <button class="btn pool-action" data-action="freeze" type="button">Freeze</button>
-          <button class="btn pool-action" data-action="resume" type="button">Resume</button>
+          <label class="switch-label"><input id="weeklyFreeze" type="checkbox"><span data-i18n="pool.freezeOnReset">Freeze on weekly reset</span></label>
+          <button class="btn pool-action" data-action="pause" type="button" data-i18n="actions.pause">Pause</button>
+          <button class="btn pool-action" data-action="freeze" type="button" data-i18n="actions.freeze">Freeze</button>
+          <button class="btn pool-action" data-action="resume" type="button" data-i18n="actions.resume">Resume</button>
         </div>
       </section>
 
@@ -324,51 +330,99 @@ DASHBOARD = r"""<!doctype html>
   </div>
 
   <dialog id="createDialog" class="modal">
-    <div class="modal-head"><div><h2>Create Harbor task</h2><span class="updated">The repository must already be registered.</span></div><button class="icon-btn dialog-close" type="button" aria-label="Close">×</button></div>
+    <div class="modal-head"><div><h2 data-i18n="create.title">Create Harbor task</h2><span class="updated" data-i18n="create.repoHint">The repository must already be registered.</span></div><button class="icon-btn dialog-close" type="button" aria-label="Close" data-i18n-aria-label="actions.close">×</button></div>
     <form id="createForm" class="modal-body">
       <div class="form-grid">
-        <label class="field wide">Title<input name="title" required placeholder="A concrete task title"></label>
-        <label class="field">Repository<select id="repositorySelect" name="repository" required></select></label>
-        <label class="field">Execution backend<select name="execution_backend"><option value="local">Local</option><option value="linux">Linux</option><option value="wsl">WSL2</option><option value="windows">Windows</option></select></label>
-        <label class="field">Priority<input name="priority" type="number" value="100"></label>
-        <label class="field">Maximum attempts<input name="max_attempts" type="number" value="5" min="1"></label>
-        <label class="field">Model<select id="modelSelect" name="model"><option value="">Inherit default</option></select></label>
-        <label class="field">Reasoning<select name="reasoning_effort"><option value="">Inherit default</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select></label>
-        <label class="field">Profile<select id="profileSelect" name="profile"><option value="">None</option></select></label>
-        <label class="field">Exclusive group<input name="exclusive_group" placeholder="Optional"></label>
-        <label class="field wide">Dependencies<input name="depends_on" placeholder="T001, T002"></label>
-        <label class="field wide">Description<textarea name="description" placeholder="Useful context for operators"></textarea></label>
-        <label class="field wide">Prompt<textarea name="prompt" required placeholder="Objective, constraints, and expected outcome"></textarea></label>
-        <label class="field wide">Acceptance commands<textarea name="acceptance_commands" placeholder="One command per line"></textarea></label>
+        <label class="field wide"><span data-i18n="fields.title">Title</span><input name="title" required placeholder="A concrete task title" data-i18n-placeholder="placeholders.taskTitle"></label>
+        <label class="field"><span data-i18n="fields.repository">Repository</span><select id="repositorySelect" name="repository" required></select></label>
+        <label class="field"><span data-i18n="fields.backend">Execution backend</span><select name="execution_backend"><option value="local" data-i18n="backend.local">Local</option><option value="linux">Linux</option><option value="wsl">WSL2</option><option value="windows">Windows</option></select></label>
+        <label class="field"><span data-i18n="fields.priority">Priority</span><input name="priority" type="number" value="100"></label>
+        <label class="field"><span data-i18n="fields.maxAttempts">Maximum attempts</span><input name="max_attempts" type="number" value="5" min="1"></label>
+        <label class="field"><span data-i18n="fields.model">Model</span><select id="modelSelect" name="model"><option value="">Inherit default</option></select></label>
+        <label class="field"><span data-i18n="fields.reasoning">Reasoning</span><select name="reasoning_effort"><option value="" data-i18n="common.inheritDefault">Inherit default</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select></label>
+        <label class="field"><span data-i18n="fields.profile">Profile</span><select id="profileSelect" name="profile"><option value="">None</option></select></label>
+        <label class="field"><span data-i18n="fields.exclusiveGroup">Exclusive group</span><input name="exclusive_group" placeholder="Optional" data-i18n-placeholder="common.optional"></label>
+        <label class="field wide"><span data-i18n="fields.dependencies">Dependencies</span><input name="depends_on" placeholder="T001, T002"></label>
+        <label class="field wide"><span data-i18n="fields.description">Description</span><textarea name="description" placeholder="Useful context for operators" data-i18n-placeholder="placeholders.description"></textarea></label>
+        <label class="field wide"><span data-i18n="fields.prompt">Prompt</span><textarea name="prompt" required placeholder="Objective, constraints, and expected outcome" data-i18n-placeholder="placeholders.prompt"></textarea></label>
+        <label class="field wide"><span data-i18n="fields.acceptanceCommands">Acceptance commands</span><textarea name="acceptance_commands" placeholder="One command per line" data-i18n-placeholder="placeholders.acceptance"></textarea></label>
       </div>
-      <div class="form-actions"><span id="createStatus" class="form-message"></span><button class="btn dialog-close" type="button">Cancel</button><button class="btn primary" type="submit">Create task</button></div>
+      <div class="form-actions"><span id="createStatus" class="form-message"></span><button class="btn dialog-close" type="button" data-i18n="actions.cancel">Cancel</button><button class="btn primary" type="submit" data-i18n="actions.createTask">Create task</button></div>
     </form>
   </dialog>
 
   <dialog id="detailDialog" class="modal drawer">
-    <div class="modal-head"><div><h2 id="detailTitle">Task</h2><span id="detailSubtitle" class="updated"></span></div><button class="icon-btn dialog-close" type="button" aria-label="Close">×</button></div>
+    <div class="modal-head"><div><h2 id="detailTitle">Task</h2><span id="detailSubtitle" class="updated"></span></div><button class="icon-btn dialog-close" type="button" aria-label="Close" data-i18n-aria-label="actions.close">×</button></div>
     <div class="modal-body">
       <div id="detailBody" class="detail-grid"></div>
-      <section class="detail-section"><h3>Agent configuration</h3><div class="form-grid"><label class="field">Model<select id="detailModel"></select></label><label class="field">Reasoning<select id="detailReasoning"><option value="">Inherit default</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select></label></div><div class="form-actions"><span id="detailStatus" class="form-message"></span><button id="saveAgent" class="btn" type="button">Save for next turn</button></div></section>
-      <section class="detail-section"><h3>Acceptance</h3><pre id="detailAcceptance">No commands configured</pre></section>
-      <section class="detail-section"><h3>Recent events</h3><pre id="detailEvents">Loading…</pre></section>
-      <div class="form-actions"><button id="copyWorktree" class="btn" type="button">Copy worktree</button><button id="copyThread" class="btn" type="button">Copy thread ID</button><button id="retryTask" class="btn" type="button">Retry</button><button id="cancelTask" class="btn danger" type="button">Cancel task</button></div>
+      <section class="detail-section"><h3 data-i18n="detail.agentConfiguration">Agent configuration</h3><div class="form-grid"><label class="field"><span data-i18n="fields.model">Model</span><select id="detailModel"></select></label><label class="field"><span data-i18n="fields.reasoning">Reasoning</span><select id="detailReasoning"><option value="" data-i18n="common.inheritDefault">Inherit default</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select></label></div><div class="form-actions"><span id="detailStatus" class="form-message"></span><button id="saveAgent" class="btn" type="button" data-i18n="actions.saveNextTurn">Save for next turn</button></div></section>
+      <section class="detail-section"><h3 data-i18n="detail.acceptance">Acceptance</h3><pre id="detailAcceptance">No commands configured</pre></section>
+      <section class="detail-section"><h3 data-i18n="detail.recentEvents">Recent events</h3><pre id="detailEvents">Loading…</pre></section>
+      <div class="form-actions"><button id="copyWorktree" class="btn" type="button" data-i18n="actions.copyWorktree">Copy worktree</button><button id="copyThread" class="btn" type="button" data-i18n="actions.copyThread">Copy thread ID</button><button id="retryTask" class="btn" type="button" data-i18n="actions.retry">Retry</button><button id="cancelTask" class="btn danger" type="button" data-i18n="actions.cancelTask">Cancel task</button></div>
     </div>
   </dialog>
 
   <script>
+    const I18N = {
+      en: {
+        'language.label':'Language', 'hero.title':'Task board', 'hero.subtitle':'Persistent Codex work, organized by lifecycle and kept safe across processes.',
+        'metrics.label':'Runtime overview', 'metrics.workers':'Workers', 'metrics.capacity':'Active scheduler capacity', 'metrics.maxParallel':'Max parallel', 'metrics.maxParallelTasks':'Maximum parallel tasks', 'metrics.fiveHour':'5-hour usage', 'metrics.weekly':'Weekly usage',
+        'quota.checking':'Checking', 'quota.unknown':'Unknown', 'quota.noData':'No data', 'quota.unavailable':'Unavailable', 'quota.used':'{value}% used', 'quota.remaining':'{value}% remaining', 'quota.resetUnavailable':'Reset time unavailable', 'quota.resets':'Resets {value}',
+        'board.search':'Search tasks', 'board.newTask':'＋ New task', 'board.empty':'No tasks in this pool',
+        'lane.backlog':'Backlog', 'lane.ready':'Ready', 'lane.active':'Active', 'lane.waiting':'Waiting', 'lane.attention':'Needs attention', 'lane.completed':'Completed',
+        'pool.freezeOnReset':'Freeze on weekly reset', 'pool.draining':'Weekly reset detected. {count} grandfathered {tasks} may continue; new tasks will not start.', 'pool.frozen':'Harbor is frozen after the weekly drain. {count} {tasks} remain queued until manual resume.', 'pool.paused':'Scheduling is paused. Running tasks may finish, but no new task will start.',
+        'actions.pause':'Pause', 'actions.freeze':'Freeze', 'actions.resume':'Resume', 'actions.close':'Close', 'actions.cancel':'Cancel', 'actions.createTask':'Create task', 'actions.saveNextTurn':'Save for next turn', 'actions.copyWorktree':'Copy worktree', 'actions.copyThread':'Copy thread ID', 'actions.retry':'Retry', 'actions.cancelTask':'Cancel task',
+        'create.title':'Create Harbor task', 'create.repoHint':'The repository must already be registered.',
+        'fields.title':'Title', 'fields.repository':'Repository', 'fields.backend':'Execution backend', 'fields.priority':'Priority', 'fields.maxAttempts':'Maximum attempts', 'fields.model':'Model', 'fields.reasoning':'Reasoning', 'fields.profile':'Profile', 'fields.exclusiveGroup':'Exclusive group', 'fields.dependencies':'Dependencies', 'fields.description':'Description', 'fields.prompt':'Prompt', 'fields.acceptanceCommands':'Acceptance commands',
+        'placeholders.taskTitle':'A concrete task title', 'placeholders.description':'Useful context for operators', 'placeholders.prompt':'Objective, constraints, and expected outcome', 'placeholders.acceptance':'One command per line',
+        'backend.local':'Local', 'common.inheritDefault':'Inherit default', 'common.optional':'Optional', 'common.none':'None', 'common.default':'default', 'common.noCommands':'No commands configured', 'common.noEvents':'No events recorded',
+        'detail.agentConfiguration':'Agent configuration', 'detail.acceptance':'Acceptance', 'detail.recentEvents':'Recent events', 'detail.status':'Status', 'detail.priority':'Priority', 'detail.requestedAgent':'Requested agent', 'detail.effectiveAgent':'Effective agent', 'detail.pendingAgent':'Pending agent', 'detail.attempt':'Attempt', 'detail.worker':'Worker', 'detail.dependencies':'Dependencies', 'detail.rootThread':'Root thread', 'detail.activeThread':'Active thread', 'detail.worktree':'Worktree', 'detail.blockedReason':'Blocked reason',
+        'runtime.idle':'Idle', 'runtime.active':'{count} active', 'runtime.connecting':'Connecting…', 'runtime.updated':'Updated {time}', 'runtime.disconnected':'Disconnected', 'runtime.apiUnavailable':'Harbor API unavailable: {message}',
+        'options.registerRepo':'Register a repository with harbor repo add', 'options.defaultMarker':'default',
+        'messages.creating':'Creating…', 'messages.saved':'Saved', 'messages.copied':'{label} copied', 'messages.copyFailed':'Copy failed: {value}', 'messages.worktreePath':'Worktree path', 'messages.threadId':'Thread ID',
+        'task.attempt':'Attempt {current}/{max}', 'task.taskOne':'task', 'task.taskMany':'tasks',
+        'theme.useLight':'Use light theme', 'theme.useDark':'Use dark theme',
+        'status.CREATED':'Created', 'status.PENDING':'Pending', 'status.WAIT_DEP':'Waiting for dependencies', 'status.READY':'Ready', 'status.CLAIMED':'Claimed', 'status.RUNNING':'Running', 'status.WAIT_QUOTA':'Waiting for quota', 'status.RETRY_WAIT':'Retry waiting', 'status.BLOCKED':'Blocked', 'status.SUCCEEDED':'Succeeded', 'status.FAILED':'Failed', 'status.CANCELLED':'Cancelled',
+        'poolState.RUNNING':'Running', 'poolState.PAUSED':'Paused', 'poolState.DRAINING':'Draining', 'poolState.FROZEN':'Frozen'
+      },
+      'zh-CN': {
+        'language.label':'语言', 'hero.title':'任务看板', 'hero.subtitle':'按生命周期组织持久化 Codex 任务，并确保任务可跨进程安全恢复。',
+        'metrics.label':'运行状态概览', 'metrics.workers':'工作进程', 'metrics.capacity':'调度器可用容量', 'metrics.maxParallel':'最大并行', 'metrics.maxParallelTasks':'最大并行任务数', 'metrics.fiveHour':'5 小时额度', 'metrics.weekly':'周额度',
+        'quota.checking':'检查中', 'quota.unknown':'未知', 'quota.noData':'暂无数据', 'quota.unavailable':'不可用', 'quota.used':'已使用 {value}%', 'quota.remaining':'剩余 {value}%', 'quota.resetUnavailable':'暂无重置时间', 'quota.resets':'重置时间 {value}',
+        'board.search':'搜索任务', 'board.newTask':'＋ 新建任务', 'board.empty':'该状态池暂无任务',
+        'lane.backlog':'待处理', 'lane.ready':'就绪', 'lane.active':'执行中', 'lane.waiting':'等待中', 'lane.attention':'需要处理', 'lane.completed':'已完成',
+        'pool.freezeOnReset':'周额度重置后冻结', 'pool.draining':'检测到周额度重置。{count} 个存量任务可继续执行；新任务暂不启动。', 'pool.frozen':'周额度排空后 Harbor 已冻结。仍有 {count} 个任务排队，需手动恢复。', 'pool.paused':'调度已暂停。运行中的任务可以完成，但不会启动新任务。',
+        'actions.pause':'暂停', 'actions.freeze':'冻结', 'actions.resume':'恢复', 'actions.close':'关闭', 'actions.cancel':'取消', 'actions.createTask':'创建任务', 'actions.saveNextTurn':'保存并在下一轮生效', 'actions.copyWorktree':'复制工作树路径', 'actions.copyThread':'复制线程 ID', 'actions.retry':'重试', 'actions.cancelTask':'取消任务',
+        'create.title':'创建 Harbor 任务', 'create.repoHint':'仓库必须已经在 Harbor 中注册。',
+        'fields.title':'标题', 'fields.repository':'仓库', 'fields.backend':'执行后端', 'fields.priority':'优先级', 'fields.maxAttempts':'最大尝试次数', 'fields.model':'模型', 'fields.reasoning':'推理等级', 'fields.profile':'配置模板', 'fields.exclusiveGroup':'互斥组', 'fields.dependencies':'依赖任务', 'fields.description':'说明', 'fields.prompt':'任务提示词', 'fields.acceptanceCommands':'验收命令',
+        'placeholders.taskTitle':'输入明确的任务标题', 'placeholders.description':'供管理者查看的补充信息', 'placeholders.prompt':'目标、约束和预期结果', 'placeholders.acceptance':'每行一条命令',
+        'backend.local':'本机', 'common.inheritDefault':'继承默认值', 'common.optional':'可选', 'common.none':'无', 'common.default':'默认', 'common.noCommands':'未配置验收命令', 'common.noEvents':'暂无事件记录',
+        'detail.agentConfiguration':'Agent 配置', 'detail.acceptance':'验收命令', 'detail.recentEvents':'最近事件', 'detail.status':'状态', 'detail.priority':'优先级', 'detail.requestedAgent':'请求配置', 'detail.effectiveAgent':'实际配置', 'detail.pendingAgent':'待生效配置', 'detail.attempt':'尝试次数', 'detail.worker':'工作进程', 'detail.dependencies':'依赖任务', 'detail.rootThread':'根线程', 'detail.activeThread':'活动线程', 'detail.worktree':'工作树', 'detail.blockedReason':'阻塞原因',
+        'runtime.idle':'空闲', 'runtime.active':'{count} 个活动', 'runtime.connecting':'连接中…', 'runtime.updated':'更新于 {time}', 'runtime.disconnected':'连接已断开', 'runtime.apiUnavailable':'Harbor API 不可用：{message}',
+        'options.registerRepo':'请先使用 harbor repo add 注册仓库', 'options.defaultMarker':'默认',
+        'messages.creating':'正在创建…', 'messages.saved':'已保存', 'messages.copied':'已复制{label}', 'messages.copyFailed':'复制失败：{value}', 'messages.worktreePath':'工作树路径', 'messages.threadId':'线程 ID',
+        'task.attempt':'第 {current}/{max} 次尝试', 'task.taskOne':'任务', 'task.taskMany':'任务',
+        'theme.useLight':'切换到白天模式', 'theme.useDark':'切换到黑夜模式',
+        'status.CREATED':'已创建', 'status.PENDING':'待调度', 'status.WAIT_DEP':'等待依赖', 'status.READY':'就绪', 'status.CLAIMED':'已领取', 'status.RUNNING':'运行中', 'status.WAIT_QUOTA':'等待额度', 'status.RETRY_WAIT':'等待重试', 'status.BLOCKED':'已阻塞', 'status.SUCCEEDED':'已成功', 'status.FAILED':'已失败', 'status.CANCELLED':'已取消',
+        'poolState.RUNNING':'运行中', 'poolState.PAUSED':'已暂停', 'poolState.DRAINING':'排空中', 'poolState.FROZEN':'已冻结'
+      }
+    };
     const LANES = [
-      {id:'backlog', title:'Backlog', states:['CREATED','PENDING','WAIT_DEP']},
-      {id:'ready', title:'Ready', states:['READY']},
-      {id:'active', title:'Active', states:['CLAIMED','RUNNING']},
-      {id:'waiting', title:'Waiting', states:['WAIT_QUOTA','RETRY_WAIT']},
-      {id:'attention', title:'Needs attention', states:['BLOCKED','FAILED']},
-      {id:'completed', title:'Completed', states:['SUCCEEDED','CANCELLED']}
+      {id:'backlog', titleKey:'lane.backlog', states:['CREATED','PENDING','WAIT_DEP']},
+      {id:'ready', titleKey:'lane.ready', states:['READY']},
+      {id:'active', titleKey:'lane.active', states:['CLAIMED','RUNNING']},
+      {id:'waiting', titleKey:'lane.waiting', states:['WAIT_QUOTA','RETRY_WAIT']},
+      {id:'attention', titleKey:'lane.attention', states:['BLOCKED','FAILED']},
+      {id:'completed', titleKey:'lane.completed', states:['SUCCEEDED','CANCELLED']}
     ];
-    const state = {tasks:[], models:[], profiles:[], pool:null, selectedTask:null};
+    const state = {tasks:[], models:[], profiles:[], repositories:[], quotas:[], workers:[], pool:null, selectedTask:null, language:'en'};
     const byId = id => document.getElementById(id);
     const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
     const basename = path => String(path || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() || 'repository';
+    const t = (key, values={}) => {
+      const template = I18N[state.language]?.[key] ?? I18N.en[key] ?? key;
+      return Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, String(value)), template);
+    };
 
     async function request(path, options={}) {
       const response = await fetch(path, options);
@@ -380,7 +434,8 @@ DASHBOARD = r"""<!doctype html>
     function applyTheme(theme) {
       document.documentElement.dataset.theme = theme;
       byId('themeToggle').textContent = theme === 'dark' ? '☀' : '☾';
-      byId('themeToggle').title = theme === 'dark' ? 'Use light theme' : 'Use dark theme';
+      byId('themeToggle').title = theme === 'dark' ? t('theme.useLight') : t('theme.useDark');
+      byId('themeToggle').setAttribute('aria-label', byId('themeToggle').title);
       localStorage.setItem('harbor-theme', theme);
     }
     function initializeTheme() {
@@ -389,50 +444,75 @@ DASHBOARD = r"""<!doctype html>
       applyTheme(['light','dark'].includes(requested) ? requested : (saved || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')));
     }
 
+    function applyLanguage(language, persist=true) {
+      state.language = language === 'zh-CN' ? 'zh-CN' : 'en';
+      document.documentElement.lang = state.language;
+      byId('languageSelect').value = state.language;
+      document.querySelectorAll('[data-i18n]').forEach(element => { element.textContent = t(element.dataset.i18n); });
+      document.querySelectorAll('[data-i18n-placeholder]').forEach(element => { element.placeholder = t(element.dataset.i18nPlaceholder); });
+      document.querySelectorAll('[data-i18n-aria-label]').forEach(element => { element.setAttribute('aria-label', t(element.dataset.i18nAriaLabel)); });
+      if (persist) localStorage.setItem('harbor-language', state.language);
+      if (document.documentElement.dataset.theme) applyTheme(document.documentElement.dataset.theme);
+      renderOptions();
+      if (state.pool) renderOverview(state.pool, state.tasks, state.quotas, state.workers);
+      if (state.selectedTask && byId('detailDialog').open) showTask(state.selectedTask.id);
+    }
+    function initializeLanguage() {
+      const requested = new URLSearchParams(location.search).get('lang');
+      const saved = localStorage.getItem('harbor-language');
+      const detected = navigator.language?.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
+      applyLanguage(['en','zh-CN'].includes(requested) ? requested : (saved || detected), false);
+    }
+
     function formatReset(value) {
-      if (!value) return 'Reset time unavailable';
+      if (!value) return t('quota.resetUnavailable');
       const date = new Date(value);
-      if (Number.isNaN(date.valueOf())) return `Resets ${value}`;
-      return `Resets ${new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}).format(date)}`;
+      if (Number.isNaN(date.valueOf())) return t('quota.resets', {value});
+      const formatted = new Intl.DateTimeFormat(state.language,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}).format(date);
+      return t('quota.resets', {value:formatted});
     }
     function quotaView(quota, valueId, barId, resetId, availabilityId) {
       const used = quota?.used_percent;
-      byId(valueId).textContent = used == null ? 'Unknown' : `${Math.round(used)}% used`;
-      byId(barId).style.width = `${Math.min(100, Math.max(0, Number(used) || 0))}%`;
+      const remaining = quota?.remaining ?? (used == null ? null : Math.max(0, 100 - used));
+      byId(valueId).textContent = remaining == null ? t('quota.unknown') : t('quota.remaining', {value:Math.round(remaining)});
+      byId(barId).style.width = `${Math.min(100, Math.max(0, Number(remaining) || 0))}%`;
       byId(resetId).textContent = formatReset(quota?.reset_at);
-      byId(availabilityId).textContent = quota ? (quota.available ? `${Math.round(quota.remaining ?? 0)}% left` : 'Unavailable') : 'No data';
+      byId(availabilityId).textContent = quota ? (quota.available ? t('quota.used', {value:Math.round(used ?? 0)}) : t('quota.unavailable')) : t('quota.noData');
     }
-    function taskAgent(task) { return `${task.model || 'default'} / ${task.reasoning_effort || 'default'}`; }
+    function taskAgent(task) { return `${task.model || t('common.default')} / ${task.reasoning_effort || t('common.default')}`; }
     function renderBoard() {
       const query = byId('searchInput').value.trim().toLowerCase();
-      const filtered = state.tasks.filter(task => !query || [task.id, task.title, task.status, task.repository, task.model, task.reasoning_effort].some(value => String(value || '').toLowerCase().includes(query)));
+      const filtered = state.tasks.filter(task => !query || [task.id, task.title, task.status, t(`status.${task.status}`), task.repository, task.model, task.reasoning_effort].some(value => String(value || '').toLowerCase().includes(query)));
       byId('board').innerHTML = LANES.map(lane => {
         const items = filtered.filter(task => lane.states.includes(task.status));
-        const cards = items.map(task => `<button class="task-card" type="button" data-task-id="${esc(task.id)}"><span class="card-top"><span class="task-id">${esc(task.id)}</span><span class="status-chip" data-status="${esc(task.status)}">${esc(task.status)}</span></span><span class="task-title">${esc(task.title)}</span><span class="card-meta"><span class="meta-tag">${esc(taskAgent(task))}</span><span class="meta-tag">P${esc(task.priority)}</span><span class="meta-tag">${esc(basename(task.repository))}</span>${task.current_attempt ? `<span class="meta-tag">Attempt ${esc(task.current_attempt)}/${esc(task.max_attempts)}</span>` : ''}</span></button>`).join('');
-        return `<section class="lane" data-lane="${lane.id}"><header class="lane-head"><span class="lane-title"><i class="lane-dot"></i>${lane.title}</span><span class="count">${items.length}</span></header><div class="card-list">${cards || '<div class="empty-lane">No tasks in this pool</div>'}</div></section>`;
+        const cards = items.map(task => `<button class="task-card" type="button" data-task-id="${esc(task.id)}"><span class="card-top"><span class="task-id">${esc(task.id)}</span><span class="status-chip" data-status="${esc(task.status)}">${esc(t(`status.${task.status}`))}</span></span><span class="task-title">${esc(task.title)}</span><span class="card-meta"><span class="meta-tag">${esc(taskAgent(task))}</span><span class="meta-tag">P${esc(task.priority)}</span><span class="meta-tag">${esc(basename(task.repository))}</span>${task.current_attempt ? `<span class="meta-tag">${esc(t('task.attempt', {current:task.current_attempt, max:task.max_attempts}))}</span>` : ''}</span></button>`).join('');
+        return `<section class="lane" data-lane="${lane.id}"><header class="lane-head"><span class="lane-title"><i class="lane-dot"></i>${esc(t(lane.titleKey))}</span><span class="count">${items.length}</span></header><div class="card-list">${cards || `<div class="empty-lane">${esc(t('board.empty'))}</div>`}</div></section>`;
       }).join('');
     }
 
     function renderOverview(pool, tasks, quotas, workers) {
       state.pool = pool;
       state.tasks = tasks;
-      byId('poolPill').textContent = pool.state;
+      state.quotas = quotas;
+      state.workers = workers;
+      byId('poolPill').textContent = t(`poolState.${pool.state}`);
       byId('poolPill').dataset.state = pool.state;
       byId('weeklyFreeze').checked = Boolean(pool.freeze_on_weekly_reset);
       const maxWorkers = pool.max_workers ?? 3;
       byId('workers').textContent = `${workers.length} / ${maxWorkers}`;
-      byId('workerState').textContent = workers.length ? `${workers.length} active` : 'Idle';
+      if (document.activeElement !== byId('maxWorkersInput')) byId('maxWorkersInput').value = maxWorkers;
+      byId('workerState').textContent = workers.length ? t('runtime.active', {count:workers.length}) : t('runtime.idle');
       const poolNotice = byId('poolNotice');
       if (pool.state === 'DRAINING') {
         const draining = tasks.filter(task => task.grandfathered && !['SUCCEEDED','FAILED','CANCELLED','BLOCKED'].includes(task.status)).length;
-        poolNotice.textContent = `Weekly reset detected. ${draining} grandfathered task${draining === 1 ? '' : 's'} may continue; new tasks will not start.`;
+        poolNotice.textContent = t('pool.draining', {count:draining, tasks:t(draining === 1 ? 'task.taskOne' : 'task.taskMany')});
         poolNotice.classList.add('show');
       } else if (pool.state === 'FROZEN') {
         const remaining = tasks.filter(task => !['SUCCEEDED','FAILED','CANCELLED','BLOCKED'].includes(task.status)).length;
-        poolNotice.textContent = `Harbor is frozen after the weekly drain. ${remaining} task${remaining === 1 ? '' : 's'} remain queued until manual resume.`;
+        poolNotice.textContent = t('pool.frozen', {count:remaining, tasks:t(remaining === 1 ? 'task.taskOne' : 'task.taskMany')});
         poolNotice.classList.add('show');
       } else if (pool.state === 'PAUSED') {
-        poolNotice.textContent = 'Scheduling is paused. Running tasks may finish, but no new task will start.';
+        poolNotice.textContent = t('pool.paused');
         poolNotice.classList.add('show');
       } else {
         poolNotice.classList.remove('show');
@@ -447,23 +527,45 @@ DASHBOARD = r"""<!doctype html>
         const [pool, tasks, quotas, workers] = await Promise.all([request('/api/pool'), request('/api/tasks'), request('/api/quota'), request('/api/workers')]);
         renderOverview(pool, tasks, quotas, workers);
         byId('errorNotice').classList.remove('show');
-        byId('lastUpdated').textContent = `Updated ${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'})}`;
+        const time = new Date().toLocaleTimeString(state.language, {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+        byId('lastUpdated').textContent = t('runtime.updated', {time});
       } catch (error) {
-        byId('errorNotice').textContent = `Harbor API unavailable: ${error.message}`;
+        byId('errorNotice').textContent = t('runtime.apiUnavailable', {message:error.message});
         byId('errorNotice').classList.add('show');
-        byId('lastUpdated').textContent = 'Disconnected';
+        byId('lastUpdated').textContent = t('runtime.disconnected');
       }
+    }
+
+    function renderOptions() {
+      const repositorySelect = byId('repositorySelect');
+      const modelSelect = byId('modelSelect');
+      const detailModel = byId('detailModel');
+      const profileSelect = byId('profileSelect');
+      const selected = {
+        repository: repositorySelect.value,
+        model: modelSelect.value,
+        detailModel: detailModel.value,
+        profile: profileSelect.value
+      };
+      repositorySelect.innerHTML = state.repositories.length
+        ? state.repositories.map(repo => `<option value="${esc(repo.path)}">${esc(repo.name)} — ${esc(repo.path)}</option>`).join('')
+        : `<option value="">${esc(t('options.registerRepo'))}</option>`;
+      const modelOptions = `<option value="">${esc(t('common.inheritDefault'))}</option>` + state.models.map(model => `<option value="${esc(model.model)}">${esc(model.display_name)}${model.is_default ? ` (${esc(t('options.defaultMarker'))})` : ''}</option>`).join('');
+      modelSelect.innerHTML = modelOptions;
+      detailModel.innerHTML = modelOptions;
+      profileSelect.innerHTML = `<option value="">${esc(t('common.none'))}</option>` + state.profiles.map(profile => `<option value="${esc(profile.name)}">${esc(profile.name)}</option>`).join('');
+      if ([...repositorySelect.options].some(option => option.value === selected.repository)) repositorySelect.value = selected.repository;
+      if ([...modelSelect.options].some(option => option.value === selected.model)) modelSelect.value = selected.model;
+      if ([...detailModel.options].some(option => option.value === selected.detailModel)) detailModel.value = selected.detailModel;
+      if ([...profileSelect.options].some(option => option.value === selected.profile)) profileSelect.value = selected.profile;
     }
 
     async function loadOptions() {
       const [repositories, models, profiles] = await Promise.all([request('/api/repositories'), request('/api/models'), request('/api/profiles')]);
+      state.repositories = repositories;
       state.models = models;
       state.profiles = profiles;
-      byId('repositorySelect').innerHTML = repositories.length ? repositories.map(repo => `<option value="${esc(repo.path)}">${esc(repo.name)} — ${esc(repo.path)}</option>`).join('') : '<option value="">Register a repository with harbor repo add</option>';
-      const modelOptions = '<option value="">Inherit default</option>' + models.map(model => `<option value="${esc(model.model)}">${esc(model.display_name)}${model.is_default ? ' (default)' : ''}</option>`).join('');
-      byId('modelSelect').innerHTML = modelOptions;
-      byId('detailModel').innerHTML = modelOptions;
-      byId('profileSelect').innerHTML = '<option value="">None</option>' + profiles.map(profile => `<option value="${esc(profile.name)}">${esc(profile.name)}</option>`).join('');
+      renderOptions();
     }
 
     function detailItem(label, value) { return `<div class="detail-item"><span class="label">${esc(label)}</span><span class="value">${esc(value ?? '—')}</span></div>`; }
@@ -474,23 +576,23 @@ DASHBOARD = r"""<!doctype html>
         const latest = task.latest_attempt || {};
         const activeThread = (task.threads || []).at(-1) || {};
         byId('detailTitle').textContent = `${task.id} · ${task.title}`;
-        byId('detailSubtitle').textContent = `${task.status} · ${basename(task.repository)}`;
+        byId('detailSubtitle').textContent = `${t(`status.${task.status}`)} · ${basename(task.repository)}`;
         byId('detailBody').innerHTML = [
-          ['Status', task.status], ['Priority', task.priority],
-          ['Requested agent', taskAgent(task)], ['Effective agent', `${latest.effective_model || '—'} / ${latest.effective_reasoning_effort || '—'}`],
-          ['Pending agent', `${task.pending_model || '—'} / ${task.pending_reasoning_effort || '—'}`], ['Attempt', `${task.current_attempt} / ${task.max_attempts}`],
-          ['Worker', task.worker?.worker_id || '—'], ['Dependencies', (task.depends_on || []).join(', ') || 'None'],
-          ['Root thread', task.root_thread_id || '—'], ['Active thread', activeThread.thread_id || '—'],
-          ['Worktree', task.worktree_path || '—'], ['Blocked reason', task.blocked_reason || '—']
+          [t('detail.status'), t(`status.${task.status}`)], [t('detail.priority'), task.priority],
+          [t('detail.requestedAgent'), taskAgent(task)], [t('detail.effectiveAgent'), `${latest.effective_model || '—'} / ${latest.effective_reasoning_effort || '—'}`],
+          [t('detail.pendingAgent'), `${task.pending_model || '—'} / ${task.pending_reasoning_effort || '—'}`], [t('detail.attempt'), `${task.current_attempt} / ${task.max_attempts}`],
+          [t('detail.worker'), task.worker?.worker_id || '—'], [t('detail.dependencies'), (task.depends_on || []).join(', ') || t('common.none')],
+          [t('detail.rootThread'), task.root_thread_id || '—'], [t('detail.activeThread'), activeThread.thread_id || '—'],
+          [t('detail.worktree'), task.worktree_path || '—'], [t('detail.blockedReason'), task.blocked_reason || '—']
         ].map(item => detailItem(item[0], item[1])).join('');
         byId('detailModel').value = task.model || '';
         byId('detailReasoning').value = task.reasoning_effort || '';
-        byId('detailAcceptance').textContent = (task.acceptance_commands || []).join('\n') || 'No commands configured';
-        byId('detailEvents').textContent = events.map(event => `${event.timestamp}  ${event.event_type}\n${event.payload ? JSON.stringify(event.payload, null, 2) : ''}`).join('\n\n') || 'No events recorded';
+        byId('detailAcceptance').textContent = (task.acceptance_commands || []).join('\n') || t('common.noCommands');
+        byId('detailEvents').textContent = events.map(event => `${event.timestamp}  ${event.event_type}\n${event.payload ? JSON.stringify(event.payload, null, 2) : ''}`).join('\n\n') || t('common.noEvents');
         byId('detailStatus').textContent = '';
         byId('retryTask').disabled = !['FAILED','BLOCKED','CANCELLED'].includes(task.status);
         byId('cancelTask').disabled = ['SUCCEEDED','CANCELLED'].includes(task.status);
-        byId('detailDialog').showModal();
+        if (!byId('detailDialog').open) byId('detailDialog').showModal();
       } catch (error) { showError(error); }
     }
 
@@ -499,6 +601,24 @@ DASHBOARD = r"""<!doctype html>
       byId('errorNotice').classList.add('show');
     }
     async function poolAction(action) { try { await request(`/api/pool/${action}`, {method:'POST'}); await refresh(); } catch (error) { showError(error); } }
+    async function updateMaxWorkers(event) {
+      const input = event.currentTarget;
+      const maxWorkers = Number(input.value);
+      if (!Number.isInteger(maxWorkers) || maxWorkers < 1 || maxWorkers > 64) {
+        input.value = state.pool?.max_workers ?? 3;
+        return;
+      }
+      input.disabled = true;
+      try {
+        await request('/api/pool', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({max_workers:maxWorkers})});
+        await refresh();
+      } catch (error) {
+        input.value = state.pool?.max_workers ?? 3;
+        showError(error);
+      } finally {
+        input.disabled = false;
+      }
+    }
     async function taskAction(action) {
       if (!state.selectedTask) return;
       try {
@@ -509,8 +629,8 @@ DASHBOARD = r"""<!doctype html>
     }
     async function copyValue(value, label) {
       if (!value) return;
-      try { await navigator.clipboard.writeText(value); byId('detailStatus').textContent = `${label} copied`; }
-      catch { byId('detailStatus').textContent = `Copy failed: ${value}`; }
+      try { await navigator.clipboard.writeText(value); byId('detailStatus').textContent = t('messages.copied', {label}); }
+      catch { byId('detailStatus').textContent = t('messages.copyFailed', {value}); }
     }
 
     async function createTask(event) {
@@ -522,7 +642,7 @@ DASHBOARD = r"""<!doctype html>
       body.depends_on = body.depends_on ? body.depends_on.split(',').map(item => item.trim()).filter(Boolean) : [];
       body.acceptance_commands = body.acceptance_commands ? body.acceptance_commands.split('\n').map(item => item.trim()).filter(Boolean) : [];
       for (const key of ['model','reasoning_effort','profile','exclusive_group']) if (!body[key]) body[key] = null;
-      byId('createStatus').textContent = 'Creating…';
+      byId('createStatus').textContent = t('messages.creating');
       try {
         const created = await request('/api/tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
         form.reset();
@@ -534,21 +654,24 @@ DASHBOARD = r"""<!doctype html>
     }
 
     byId('themeToggle').addEventListener('click', () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
+    byId('languageSelect').addEventListener('change', event => applyLanguage(event.target.value));
     byId('searchInput').addEventListener('input', renderBoard);
     byId('newTaskButton').addEventListener('click', () => { byId('createStatus').textContent = ''; byId('createDialog').showModal(); });
     document.querySelectorAll('.dialog-close').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));
     document.querySelectorAll('.pool-action').forEach(button => button.addEventListener('click', () => poolAction(button.dataset.action)));
     byId('weeklyFreeze').addEventListener('change', async event => { try { await request('/api/pool', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({freeze_on_weekly_reset:event.target.checked})}); await refresh(); } catch (error) { event.target.checked = !event.target.checked; showError(error); } });
+    byId('maxWorkersInput').addEventListener('change', updateMaxWorkers);
     byId('board').addEventListener('click', event => { const card = event.target.closest('[data-task-id]'); if (card) showTask(card.dataset.taskId); });
     byId('createForm').addEventListener('submit', createTask);
-    byId('saveAgent').addEventListener('click', async () => { if (!state.selectedTask) return; try { const body={model:byId('detailModel').value || null, reasoning_effort:byId('detailReasoning').value || null}; await request(`/api/tasks/${encodeURIComponent(state.selectedTask.id)}/agent`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); byId('detailStatus').textContent='Saved'; await refresh(); } catch(error) { byId('detailStatus').textContent=error.message; } });
+    byId('saveAgent').addEventListener('click', async () => { if (!state.selectedTask) return; try { const body={model:byId('detailModel').value || null, reasoning_effort:byId('detailReasoning').value || null}; await request(`/api/tasks/${encodeURIComponent(state.selectedTask.id)}/agent`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); byId('detailStatus').textContent=t('messages.saved'); await refresh(); } catch(error) { byId('detailStatus').textContent=error.message; } });
     byId('retryTask').addEventListener('click', () => taskAction('retry'));
     byId('cancelTask').addEventListener('click', () => taskAction('cancel'));
-    byId('copyWorktree').addEventListener('click', () => copyValue(state.selectedTask?.worktree_path, 'Worktree path'));
-    byId('copyThread').addEventListener('click', () => copyValue(state.selectedTask?.root_thread_id, 'Thread ID'));
+    byId('copyWorktree').addEventListener('click', () => copyValue(state.selectedTask?.worktree_path, t('messages.worktreePath')));
+    byId('copyThread').addEventListener('click', () => copyValue(state.selectedTask?.root_thread_id, t('messages.threadId')));
     document.querySelectorAll('dialog').forEach(dialog => dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); }));
     document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 
+    initializeLanguage();
     initializeTheme();
     Promise.all([loadOptions(), refresh()]).catch(showError);
     setInterval(() => { if (!document.hidden) refresh(); }, 3000);

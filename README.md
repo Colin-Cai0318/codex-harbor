@@ -91,6 +91,7 @@ and reasoning configuration, so agent state never leaks between tasks.
   acceptance-command follow-up.
 - Independent task states such as `WAIT_QUOTA`, `RETRY_WAIT`, and `BLOCKED`, plus
   pool states such as `DRAINING` and `FROZEN`.
+- A runtime-adjustable, persisted maximum parallel-task limit (1–64).
 
 ### Native Codex integration
 
@@ -108,7 +109,8 @@ and reasoning configuration, so agent state never leaks between tasks.
 - Captures task history and command output after redacting authorization,
   API-key, cookie, and password material.
 - Provides a loopback-only FastAPI service and a card-based lifecycle dashboard
-  with light and dark themes.
+  with light/dark themes and a persistent English/Simplified Chinese language
+  selector. Quota cards emphasize the remaining allowance.
 
 ## Requirements
 
@@ -184,6 +186,9 @@ Important defaults are deliberately conservative:
 | `quota.freeze_on_weekly_reset` | `true` | Drains grandfathered work before freezing at a weekly reset |
 | `codex.approval_policy` | `never` | Prevents unattended workers from hanging on approval prompts |
 | `codex.sandbox` | `workspace-write` | Restricts agent writes to its task workspace |
+
+`scheduler.max_workers` seeds a new database. After initialization, the value
+can be changed live from the dashboard and is retained in Harbor's database.
 
 Use an isolated data directory when testing another Harbor instance:
 

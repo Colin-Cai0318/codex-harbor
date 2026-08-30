@@ -473,6 +473,21 @@ class HarborRepository:
                 {"enabled": enabled},
             )
 
+    def set_max_workers(self, max_workers: int) -> None:
+        if not 1 <= max_workers <= 64:
+            raise ValueError("max_workers must be between 1 and 64")
+        with self.db.transaction(immediate=True) as conn:
+            conn.execute(
+                "UPDATE pool_state SET max_workers=?, updated_at=? WHERE id=1",
+                (max_workers, utc_now()),
+            )
+            self._event(
+                conn,
+                None,
+                "POOL_MAX_WORKERS_CHANGED",
+                {"max_workers": max_workers},
+            )
+
     def begin_weekly_drain(self, new_window: str) -> None:
         now = utc_now()
         with self.db.transaction(immediate=True) as conn:
