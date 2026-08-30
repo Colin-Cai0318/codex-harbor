@@ -238,6 +238,24 @@ DASHBOARD = r"""<!doctype html>
     .field { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; }
     .switch-row { min-height: 39px; display: flex; align-items: center; gap: 9px; color: var(--text); }
     .field.wide { grid-column: 1 / -1; }
+    .mode-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; padding: 4px; border-radius: 11px; background: var(--surface-soft); }
+    .mode-tab { position: relative; display: flex; justify-content: center; padding: 9px 12px; border-radius: 8px; color: var(--muted); cursor: pointer; font-weight: 600; }
+    .mode-tab:has(input:checked) { color: var(--text); background: var(--surface-raised); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .mode-tab input { position: absolute; opacity: 0; pointer-events: none; }
+    .conversation-panel { display: grid; gap: 11px; }
+    .conversation-panel[hidden] { display: none; }
+    .selection-note { padding: 10px 11px; border: 1px solid var(--border); border-radius: 9px; color: var(--muted); background: var(--surface-soft); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .workspace-list { display: grid; gap: 7px; }
+    .workspace-row { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-raised); }
+    .workspace-row input { width: auto; }
+    .primary-choice { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; cursor: pointer; }
+    .workspace-path { overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
+    .workspace-add { display: flex; gap: 7px; }
+    .workspace-add .btn { flex: 0 0 auto; }
+    details.advanced { grid-column: 1 / -1; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-soft); }
+    details.advanced > summary { padding: 11px 13px; color: var(--muted); cursor: pointer; font-weight: 600; }
+    .advanced-body { padding: 3px 13px 13px; }
+    .field-help { color: var(--faint); font-size: 11px; }
     .form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin-top: 18px; }
     .form-message { margin-right: auto; color: var(--muted); font-size: 12px; }
     .drawer { width: min(620px, calc(100vw - 16px)); max-width: none; height: 100vh; max-height: 100vh; margin: 0 0 0 auto; border-radius: 16px 0 0 16px; }
@@ -331,27 +349,23 @@ DASHBOARD = r"""<!doctype html>
   </div>
 
   <dialog id="createDialog" class="modal">
-    <div class="modal-head"><div><h2 data-i18n="create.title">Create Harbor task</h2><span class="updated" data-i18n="create.repoHint">The repository must already be registered.</span></div><button class="icon-btn dialog-close" type="button" aria-label="Close" data-i18n-aria-label="actions.close">×</button></div>
+    <div class="modal-head"><div><h2 data-i18n="create.title">Send work to Codex</h2><span class="updated" data-i18n="create.projectHint">Choose the same Project and conversation you use in Codex.</span></div><button class="icon-btn dialog-close" type="button" aria-label="Close" data-i18n-aria-label="actions.close">×</button></div>
     <form id="createForm" class="modal-body">
       <div class="form-grid">
-        <label class="field wide"><span data-i18n="fields.title">Title</span><input name="title" required placeholder="A concrete task title" data-i18n-placeholder="placeholders.taskTitle"></label>
-        <label class="field"><span data-i18n="fields.repository">Repository</span><select id="repositorySelect" name="repository" required></select></label>
-        <label class="field"><span data-i18n="fields.backend">Execution backend</span><select name="execution_backend"><option value="local" data-i18n="backend.local">Local</option><option value="linux">Linux</option><option value="wsl">WSL2</option><option value="windows">Windows</option></select></label>
-        <label class="field"><span data-i18n="fields.priority">Priority</span><input name="priority" type="number" value="100"></label>
-        <label class="field"><span data-i18n="fields.maxAttempts">Maximum attempts</span><input name="max_attempts" type="number" value="5" min="1"></label>
-        <label class="field"><span data-i18n="fields.model">Model</span><select id="modelSelect" name="model"><option value="">Inherit default</option></select></label>
-        <label class="field"><span data-i18n="fields.reasoning">Reasoning</span><select name="reasoning_effort"><option value="" data-i18n="common.inheritDefault">Inherit default</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select></label>
-        <label class="field"><span data-i18n="fields.profile">Profile</span><select id="profileSelect" name="profile"><option value="">None</option></select></label>
-        <label class="field"><span data-i18n="fields.codexProject">Codex project</span><select id="projectSelect" name="codex_project_id"><option value="">Auto-match repository</option></select></label>
-        <label class="field"><span data-i18n="fields.workspaceMode">Workspace</span><select name="workspace_mode"><option value="project" data-i18n="workspace.project">Existing project workspace</option><option value="inherit" data-i18n="workspace.inherit">Inherit parent workspace</option><option value="isolated" data-i18n="workspace.isolated">New isolated worktree</option></select></label>
-        <label class="field"><span data-i18n="fields.sessionParent">Continue Session from task</span><input name="session_parent_task_id" placeholder="T001" data-i18n-placeholder="placeholders.sessionParent"></label>
-        <label class="field"><span data-i18n="fields.originThread">Origin conversation ID</span><input name="origin_thread_id" placeholder="Optional Codex Thread ID" data-i18n-placeholder="placeholders.originThread"></label>
-        <label class="field"><span data-i18n="fields.reuseWorkspace">Parent workspace</span><span class="switch-row"><input name="reuse_parent_worktree" type="checkbox" value="true"><span data-i18n="workspace.reuseParent">Reuse with shared Session</span></span></label>
-        <label class="field"><span data-i18n="fields.exclusiveGroup">Exclusive group</span><input name="exclusive_group" placeholder="Optional" data-i18n-placeholder="common.optional"></label>
-        <label class="field wide"><span data-i18n="fields.dependencies">Dependencies</span><input name="depends_on" placeholder="T001, T002"></label>
-        <label class="field wide"><span data-i18n="fields.description">Description</span><textarea name="description" placeholder="Useful context for operators" data-i18n-placeholder="placeholders.description"></textarea></label>
-        <label class="field wide"><span data-i18n="fields.prompt">Prompt</span><textarea name="prompt" required placeholder="Objective, constraints, and expected outcome" data-i18n-placeholder="placeholders.prompt"></textarea></label>
-        <label class="field wide"><span data-i18n="fields.acceptanceCommands">Acceptance commands</span><textarea name="acceptance_commands" placeholder="One command per line" data-i18n-placeholder="placeholders.acceptance"></textarea></label>
+        <label class="field wide"><span data-i18n="fields.codexProject">Codex project</span><select id="projectSelect" name="codex_project_id" required></select></label>
+        <div class="field wide"><span data-i18n="fields.conversation">Conversation</span><div class="mode-tabs"><label class="mode-tab"><input type="radio" name="conversation_mode" value="existing" checked><span data-i18n="conversation.existing">Existing conversation</span></label><label class="mode-tab"><input type="radio" name="conversation_mode" value="new"><span data-i18n="conversation.new">New conversation</span></label></div></div>
+        <div id="existingConversationPanel" class="field wide conversation-panel"><label class="field"><span data-i18n="fields.existingConversation">Project conversations</span><select id="threadSelect" name="thread_id"></select></label><div id="threadNote" class="selection-note" data-i18n="conversation.selectProject">Select a Project to load its conversations.</div></div>
+        <div id="newConversationPanel" class="field wide conversation-panel" hidden><span data-i18n="fields.workspaceDirectories">Workspace directories</span><span class="field-help" data-i18n="workspace.help">The primary directory must be a Git checkout. Additional directories are passed to Codex as runtime workspace roots.</span><div id="workspaceList" class="workspace-list"></div><div class="workspace-add"><input id="workspaceInput" type="text" placeholder="Absolute directory path" data-i18n-placeholder="placeholders.workspace"><button id="addWorkspace" class="btn" type="button" data-i18n="actions.addDirectory">Add directory</button></div></div>
+        <label class="field wide"><span data-i18n="fields.message">Task message</span><textarea name="message" required placeholder="Send the same message you would type in Codex" data-i18n-placeholder="placeholders.message"></textarea><span class="field-help" data-i18n="message.help">Harbor injects this message directly into the selected conversation.</span></label>
+        <details class="advanced"><summary data-i18n="create.advanced">Advanced scheduling and optional verification</summary><div class="advanced-body form-grid">
+          <label class="field"><span data-i18n="fields.backend">Execution backend</span><select name="execution_backend"><option value="local" data-i18n="backend.local">Local</option><option value="linux">Linux</option><option value="wsl">WSL2</option><option value="windows">Windows</option></select></label>
+          <label class="field"><span data-i18n="fields.priority">Priority</span><input name="priority" type="number" value="100"></label>
+          <label class="field"><span data-i18n="fields.maxAttempts">Maximum attempts</span><input name="max_attempts" type="number" value="5" min="1"></label>
+          <label class="field"><span data-i18n="fields.model">Model</span><select id="modelSelect" name="model"><option value="">Inherit default</option></select></label>
+          <label class="field"><span data-i18n="fields.reasoning">Reasoning</span><select name="reasoning_effort"><option value="" data-i18n="common.inheritDefault">Inherit default</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select></label>
+          <label class="field"><span data-i18n="fields.dependencies">Dependencies</span><input name="depends_on" placeholder="T001, T002"></label>
+          <label class="field wide"><span data-i18n="fields.acceptanceCommands">Optional verification commands</span><textarea name="acceptance_commands" placeholder="One command per line, for example: uv run pytest -q" data-i18n-placeholder="placeholders.acceptance"></textarea><span class="field-help" data-i18n="acceptance.help">Leave empty to finish when the Codex Turn completes normally. Commands are run afterwards for mechanical verification.</span></label>
+        </div></details>
       </div>
       <div class="form-actions"><span id="createStatus" class="form-message"></span><button class="btn dialog-close" type="button" data-i18n="actions.cancel">Cancel</button><button class="btn primary" type="submit" data-i18n="actions.createTask">Create task</button></div>
     </form>
@@ -377,14 +391,15 @@ DASHBOARD = r"""<!doctype html>
         'board.search':'Search tasks', 'board.newTask':'＋ New task', 'board.empty':'No tasks in this pool',
         'lane.backlog':'Backlog', 'lane.ready':'Ready', 'lane.active':'Active', 'lane.waiting':'Waiting', 'lane.attention':'Needs attention', 'lane.completed':'Completed',
         'pool.freezeOnReset':'Freeze on weekly reset', 'pool.draining':'Weekly reset detected. {count} grandfathered {tasks} may continue; new tasks will not start.', 'pool.frozen':'Harbor is frozen after the weekly drain. {count} {tasks} remain queued until manual resume.', 'pool.paused':'Scheduling is paused. Running tasks may finish, but no new task will start.',
-        'actions.pause':'Pause', 'actions.freeze':'Freeze', 'actions.resume':'Resume', 'actions.close':'Close', 'actions.cancel':'Cancel', 'actions.createTask':'Create task', 'actions.saveNextTurn':'Save for next turn', 'actions.copyWorktree':'Copy worktree', 'actions.copyThread':'Copy thread ID', 'actions.retry':'Retry', 'actions.cancelTask':'Cancel task',
-        'create.title':'Create Harbor task', 'create.repoHint':'The repository must already be registered.',
-        'fields.title':'Title', 'fields.repository':'Repository', 'fields.backend':'Execution backend', 'fields.priority':'Priority', 'fields.maxAttempts':'Failure retry limit', 'fields.model':'Model', 'fields.reasoning':'Reasoning', 'fields.profile':'Profile', 'fields.codexProject':'Codex project', 'fields.workspaceMode':'Workspace', 'fields.sessionParent':'Continue Session from task', 'fields.originThread':'Origin conversation ID', 'fields.reuseWorkspace':'Parent workspace', 'fields.exclusiveGroup':'Exclusive group', 'fields.dependencies':'Dependencies', 'fields.description':'Description', 'fields.prompt':'Prompt', 'fields.acceptanceCommands':'Acceptance commands',
-        'placeholders.taskTitle':'A concrete task title', 'placeholders.description':'Useful context for operators', 'placeholders.prompt':'Objective, constraints, and expected outcome', 'placeholders.acceptance':'One command per line', 'placeholders.sessionParent':'For example T001', 'placeholders.originThread':'Optional Codex Thread ID',
-        'backend.local':'Local', 'workspace.project':'Existing project workspace', 'workspace.inherit':'Inherit parent workspace', 'workspace.isolated':'New isolated worktree', 'workspace.reuseParent':'Reuse with shared Session', 'project.auto':'Auto-match repository', 'common.inheritDefault':'Inherit default', 'common.optional':'Optional', 'common.none':'None', 'common.default':'default', 'common.noCommands':'No commands configured', 'common.noEvents':'No events recorded',
-        'detail.agentConfiguration':'Agent configuration', 'detail.acceptance':'Acceptance', 'detail.recentEvents':'Recent events', 'detail.status':'Status', 'detail.priority':'Priority', 'detail.requestedAgent':'Requested agent', 'detail.effectiveAgent':'Effective agent', 'detail.pendingAgent':'Pending agent', 'detail.turn':'Execution turns', 'detail.failures':'Counted failures', 'detail.latestTurn':'Latest Codex turn', 'detail.worker':'Worker', 'detail.dependencies':'Dependencies', 'detail.taskGroup':'Task group', 'detail.codexProject':'Codex project', 'detail.sessionParent':'Session parent', 'detail.workspaceMode':'Workspace mode', 'detail.rootThread':'Root thread', 'detail.activeThread':'Active thread', 'detail.worktree':'Worktree', 'detail.blockedReason':'Blocked reason',
+        'actions.pause':'Pause', 'actions.freeze':'Freeze', 'actions.resume':'Resume', 'actions.close':'Close', 'actions.cancel':'Cancel', 'actions.createTask':'Send task', 'actions.addDirectory':'Add directory', 'actions.remove':'Remove', 'actions.saveNextTurn':'Save for next turn', 'actions.copyWorktree':'Copy worktree', 'actions.copyThread':'Copy thread ID', 'actions.retry':'Retry', 'actions.cancelTask':'Cancel task',
+        'create.title':'Send work to Codex', 'create.projectHint':'Choose the same Project and conversation you use in Codex.', 'create.advanced':'Advanced scheduling and optional verification',
+        'fields.backend':'Execution backend', 'fields.priority':'Priority', 'fields.maxAttempts':'Failure retry limit', 'fields.model':'Model', 'fields.reasoning':'Reasoning', 'fields.codexProject':'Codex project', 'fields.conversation':'Conversation', 'fields.existingConversation':'Project conversations', 'fields.workspaceDirectories':'Workspace directories', 'fields.dependencies':'Dependencies', 'fields.message':'Task message', 'fields.acceptanceCommands':'Optional verification commands',
+        'placeholders.message':'Send the same message you would type in Codex', 'placeholders.workspace':'Absolute directory path', 'placeholders.acceptance':'One command per line, for example: uv run pytest -q',
+        'conversation.existing':'Existing conversation', 'conversation.new':'New conversation', 'conversation.selectProject':'Select a Project to load its conversations.', 'conversation.loading':'Loading conversations…', 'conversation.empty':'No conversations in this Project. Choose New conversation.', 'conversation.details':'{cwd}\n{preview}', 'workspace.help':'The primary directory must be a Git checkout. Additional directories are passed to Codex as runtime workspace roots.', 'workspace.primary':'Primary', 'workspace.empty':'Add at least one workspace directory.', 'message.help':'Harbor injects this message directly into the selected conversation.', 'acceptance.help':'Leave empty to finish when the Codex Turn completes normally. Commands run afterwards for mechanical verification.',
+        'backend.local':'Local', 'common.inheritDefault':'Inherit default', 'common.optional':'Optional', 'common.none':'None', 'common.default':'default', 'common.noCommands':'No commands configured', 'common.noEvents':'No events recorded',
+        'detail.agentConfiguration':'Agent configuration', 'detail.acceptance':'Acceptance', 'detail.recentEvents':'Recent events', 'detail.status':'Status', 'detail.priority':'Priority', 'detail.requestedAgent':'Requested agent', 'detail.effectiveAgent':'Effective agent', 'detail.pendingAgent':'Pending agent', 'detail.turn':'Execution turns', 'detail.failures':'Counted failures', 'detail.latestTurn':'Latest Codex turn', 'detail.worker':'Worker', 'detail.dependencies':'Dependencies', 'detail.taskGroup':'Task group', 'detail.codexProject':'Codex project', 'detail.conversationMode':'Conversation mode', 'detail.conversationCwd':'Conversation workspace', 'detail.workspaceRoots':'Workspace directories', 'detail.rootThread':'Root conversation', 'detail.activeThread':'Active conversation', 'detail.worktree':'Git workspace', 'detail.blockedReason':'Blocked reason',
         'runtime.idle':'Idle', 'runtime.active':'{count} active', 'runtime.connecting':'Connecting…', 'runtime.updated':'Updated {time}', 'runtime.disconnected':'Disconnected', 'runtime.apiUnavailable':'Harbor API unavailable: {message}',
-        'options.registerRepo':'Register a repository with harbor repo add', 'options.defaultMarker':'default',
+        'options.selectProject':'Select a Codex Project', 'options.defaultMarker':'default',
         'messages.creating':'Creating…', 'messages.saved':'Saved', 'messages.copied':'{label} copied', 'messages.copyFailed':'Copy failed: {value}', 'messages.worktreePath':'Worktree path', 'messages.threadId':'Thread ID',
         'task.turnFailures':'Turn {turn} · failures {failures}/{max}', 'task.taskOne':'task', 'task.taskMany':'tasks',
         'theme.useLight':'Use light theme', 'theme.useDark':'Use dark theme',
@@ -398,14 +413,15 @@ DASHBOARD = r"""<!doctype html>
         'board.search':'搜索任务', 'board.newTask':'＋ 新建任务', 'board.empty':'该状态池暂无任务',
         'lane.backlog':'待处理', 'lane.ready':'就绪', 'lane.active':'执行中', 'lane.waiting':'等待中', 'lane.attention':'需要处理', 'lane.completed':'已完成',
         'pool.freezeOnReset':'周额度重置后冻结', 'pool.draining':'检测到周额度重置。{count} 个存量任务可继续执行；新任务暂不启动。', 'pool.frozen':'周额度排空后 Harbor 已冻结。仍有 {count} 个任务排队，需手动恢复。', 'pool.paused':'调度已暂停。运行中的任务可以完成，但不会启动新任务。',
-        'actions.pause':'暂停', 'actions.freeze':'冻结', 'actions.resume':'恢复', 'actions.close':'关闭', 'actions.cancel':'取消', 'actions.createTask':'创建任务', 'actions.saveNextTurn':'保存并在下一轮生效', 'actions.copyWorktree':'复制工作树路径', 'actions.copyThread':'复制线程 ID', 'actions.retry':'重试', 'actions.cancelTask':'取消任务',
-        'create.title':'创建 Harbor 任务', 'create.repoHint':'仓库必须已经在 Harbor 中注册。',
-        'fields.title':'标题', 'fields.repository':'仓库', 'fields.backend':'执行后端', 'fields.priority':'优先级', 'fields.maxAttempts':'失败重试上限', 'fields.model':'模型', 'fields.reasoning':'推理等级', 'fields.profile':'配置模板', 'fields.codexProject':'Codex 项目', 'fields.workspaceMode':'工作区', 'fields.sessionParent':'延续哪个任务的 Session', 'fields.originThread':'来源开发对话 ID', 'fields.reuseWorkspace':'父任务工作区', 'fields.exclusiveGroup':'互斥组', 'fields.dependencies':'依赖任务', 'fields.description':'说明', 'fields.prompt':'任务提示词', 'fields.acceptanceCommands':'验收命令',
-        'placeholders.taskTitle':'输入明确的任务标题', 'placeholders.description':'供管理者查看的补充信息', 'placeholders.prompt':'目标、约束和预期结果', 'placeholders.acceptance':'每行一条命令', 'placeholders.sessionParent':'例如 T001', 'placeholders.originThread':'可选 Codex Thread ID',
-        'backend.local':'本机', 'workspace.project':'使用现有项目工作区', 'workspace.inherit':'继承父任务工作区', 'workspace.isolated':'新建隔离 worktree', 'workspace.reuseParent':'与共享 Session 一起复用', 'project.auto':'按仓库自动匹配', 'common.inheritDefault':'继承默认值', 'common.optional':'可选', 'common.none':'无', 'common.default':'默认', 'common.noCommands':'未配置验收命令', 'common.noEvents':'暂无事件记录',
-        'detail.agentConfiguration':'Agent 配置', 'detail.acceptance':'验收命令', 'detail.recentEvents':'最近事件', 'detail.status':'状态', 'detail.priority':'优先级', 'detail.requestedAgent':'请求配置', 'detail.effectiveAgent':'实际配置', 'detail.pendingAgent':'待生效配置', 'detail.turn':'执行轮次', 'detail.failures':'计入预算的失败', 'detail.latestTurn':'最近 Codex Turn', 'detail.worker':'工作进程', 'detail.dependencies':'依赖任务', 'detail.taskGroup':'任务组', 'detail.codexProject':'Codex 项目', 'detail.sessionParent':'Session 父任务', 'detail.workspaceMode':'工作区模式', 'detail.rootThread':'根线程', 'detail.activeThread':'活动线程', 'detail.worktree':'工作树', 'detail.blockedReason':'阻塞原因',
+        'actions.pause':'暂停', 'actions.freeze':'冻结', 'actions.resume':'恢复', 'actions.close':'关闭', 'actions.cancel':'取消', 'actions.createTask':'发送任务', 'actions.addDirectory':'添加目录', 'actions.remove':'移除', 'actions.saveNextTurn':'保存并在下一轮生效', 'actions.copyWorktree':'复制工作树路径', 'actions.copyThread':'复制线程 ID', 'actions.retry':'重试', 'actions.cancelTask':'取消任务',
+        'create.title':'发送任务到 Codex', 'create.projectHint':'选择与你在 Codex 中使用的同一个项目和对话。', 'create.advanced':'高级调度与可选验证',
+        'fields.backend':'执行后端', 'fields.priority':'优先级', 'fields.maxAttempts':'失败重试上限', 'fields.model':'模型', 'fields.reasoning':'推理等级', 'fields.codexProject':'Codex 项目', 'fields.conversation':'对话', 'fields.existingConversation':'项目中的对话', 'fields.workspaceDirectories':'工作区目录', 'fields.dependencies':'依赖任务', 'fields.message':'任务消息', 'fields.acceptanceCommands':'可选验证命令',
+        'placeholders.message':'输入像在 Codex 当前对话中发送的消息', 'placeholders.workspace':'绝对目录路径', 'placeholders.acceptance':'每行一条命令，例如：uv run pytest -q',
+        'conversation.existing':'选择已有对话', 'conversation.new':'新建对话', 'conversation.selectProject':'选择 Codex 项目后加载其中的对话。', 'conversation.loading':'正在加载对话…', 'conversation.empty':'该项目还没有对话，请选择“新建对话”。', 'conversation.details':'{cwd}\n{preview}', 'workspace.help':'主目录必须是 Git 工作区；其他目录会作为 runtime workspace roots 一并交给 Codex。', 'workspace.primary':'主目录', 'workspace.empty':'请至少添加一个工作区目录。', 'message.help':'Harbor 会把这条消息直接注入所选 Codex 对话。', 'acceptance.help':'留空时，Codex Turn 正常完成即算成功；填写后会在结束时运行这些命令做机械验证。',
+        'backend.local':'本机', 'common.inheritDefault':'继承默认值', 'common.optional':'可选', 'common.none':'无', 'common.default':'默认', 'common.noCommands':'未配置验证命令', 'common.noEvents':'暂无事件记录',
+        'detail.agentConfiguration':'Agent 配置', 'detail.acceptance':'验收命令', 'detail.recentEvents':'最近事件', 'detail.status':'状态', 'detail.priority':'优先级', 'detail.requestedAgent':'请求配置', 'detail.effectiveAgent':'实际配置', 'detail.pendingAgent':'待生效配置', 'detail.turn':'执行轮次', 'detail.failures':'计入预算的失败', 'detail.latestTurn':'最近 Codex Turn', 'detail.worker':'工作进程', 'detail.dependencies':'依赖任务', 'detail.taskGroup':'任务组', 'detail.codexProject':'Codex 项目', 'detail.conversationMode':'对话模式', 'detail.conversationCwd':'对话工作区', 'detail.workspaceRoots':'工作区目录', 'detail.rootThread':'根对话', 'detail.activeThread':'活动对话', 'detail.worktree':'Git 工作区', 'detail.blockedReason':'阻塞原因',
         'runtime.idle':'空闲', 'runtime.active':'{count} 个活动', 'runtime.connecting':'连接中…', 'runtime.updated':'更新于 {time}', 'runtime.disconnected':'连接已断开', 'runtime.apiUnavailable':'Harbor API 不可用：{message}',
-        'options.registerRepo':'请先使用 harbor repo add 注册仓库', 'options.defaultMarker':'默认',
+        'options.selectProject':'请选择 Codex 项目', 'options.defaultMarker':'默认',
         'messages.creating':'正在创建…', 'messages.saved':'已保存', 'messages.copied':'已复制{label}', 'messages.copyFailed':'复制失败：{value}', 'messages.worktreePath':'工作树路径', 'messages.threadId':'线程 ID',
         'task.turnFailures':'第 {turn} 轮 · 失败 {failures}/{max}', 'task.taskOne':'任务', 'task.taskMany':'任务',
         'theme.useLight':'切换到白天模式', 'theme.useDark':'切换到黑夜模式',
@@ -421,7 +437,7 @@ DASHBOARD = r"""<!doctype html>
       {id:'attention', titleKey:'lane.attention', states:['BLOCKED','FAILED']},
       {id:'completed', titleKey:'lane.completed', states:['SUCCEEDED','CANCELLED']}
     ];
-    const state = {tasks:[], models:[], profiles:[], projects:[], repositories:[], quotas:[], workers:[], pool:null, selectedTask:null, language:'en'};
+    const state = {tasks:[], models:[], projects:[], threads:[], workspaceRoots:[], primaryWorkspace:null, quotas:[], workers:[], pool:null, selectedTask:null, language:'en'};
     const byId = id => document.getElementById(id);
     const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
     const basename = path => String(path || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() || 'repository';
@@ -460,6 +476,8 @@ DASHBOARD = r"""<!doctype html>
       if (persist) localStorage.setItem('harbor-language', state.language);
       if (document.documentElement.dataset.theme) applyTheme(document.documentElement.dataset.theme);
       renderOptions();
+      renderThreads();
+      renderWorkspaces();
       if (state.pool) renderOverview(state.pool, state.tasks, state.quotas, state.workers);
       if (state.selectedTask && byId('detailDialog').open) showTask(state.selectedTask.id);
     }
@@ -543,40 +561,101 @@ DASHBOARD = r"""<!doctype html>
     }
 
     function renderOptions() {
-      const repositorySelect = byId('repositorySelect');
       const modelSelect = byId('modelSelect');
       const detailModel = byId('detailModel');
-      const profileSelect = byId('profileSelect');
       const projectSelect = byId('projectSelect');
       const selected = {
-        repository: repositorySelect.value,
         model: modelSelect.value,
         detailModel: detailModel.value,
-        profile: profileSelect.value,
         project: projectSelect.value
       };
-      repositorySelect.innerHTML = state.repositories.length
-        ? state.repositories.map(repo => `<option value="${esc(repo.path)}">${esc(repo.name)} — ${esc(repo.path)}</option>`).join('')
-        : `<option value="">${esc(t('options.registerRepo'))}</option>`;
       const modelOptions = `<option value="">${esc(t('common.inheritDefault'))}</option>` + state.models.map(model => `<option value="${esc(model.model)}">${esc(model.display_name)}${model.is_default ? ` (${esc(t('options.defaultMarker'))})` : ''}</option>`).join('');
       modelSelect.innerHTML = modelOptions;
       detailModel.innerHTML = modelOptions;
-      profileSelect.innerHTML = `<option value="">${esc(t('common.none'))}</option>` + state.profiles.map(profile => `<option value="${esc(profile.name)}">${esc(profile.name)}</option>`).join('');
-      projectSelect.innerHTML = `<option value="">${esc(t('project.auto'))}</option>` + state.projects.map(project => `<option value="${esc(project.id)}">${esc(project.name)}</option>`).join('');
-      if ([...repositorySelect.options].some(option => option.value === selected.repository)) repositorySelect.value = selected.repository;
+      projectSelect.innerHTML = `<option value="">${esc(t('options.selectProject'))}</option>` + state.projects.map(project => `<option value="${esc(project.id)}">${esc(project.name)}</option>`).join('');
       if ([...modelSelect.options].some(option => option.value === selected.model)) modelSelect.value = selected.model;
       if ([...detailModel.options].some(option => option.value === selected.detailModel)) detailModel.value = selected.detailModel;
-      if ([...profileSelect.options].some(option => option.value === selected.profile)) profileSelect.value = selected.profile;
       if ([...projectSelect.options].some(option => option.value === selected.project)) projectSelect.value = selected.project;
     }
 
     async function loadOptions() {
-      const [repositories, models, profiles, projects] = await Promise.all([request('/api/repositories'), request('/api/models'), request('/api/profiles'), request('/api/codex/projects')]);
-      state.repositories = repositories;
+      const [models, projects] = await Promise.all([request('/api/models'), request('/api/codex/projects')]);
       state.models = models;
-      state.profiles = profiles;
       state.projects = projects;
       renderOptions();
+    }
+
+    function threadLabel(thread) {
+      const preview = String(thread.preview || '').split(/\r?\n/).find(line => line.trim()) || thread.id;
+      return thread.name || preview.slice(0, 80);
+    }
+
+    function renderThreads() {
+      const select = byId('threadSelect');
+      const selected = select.value;
+      if (!byId('projectSelect').value) {
+        select.innerHTML = `<option value="">${esc(t('conversation.selectProject'))}</option>`;
+      } else if (!state.threads.length) {
+        select.innerHTML = `<option value="">${esc(t('conversation.empty'))}</option>`;
+      } else {
+        select.innerHTML = state.threads.map(thread => `<option value="${esc(thread.id)}">${esc(threadLabel(thread))} — ${esc(thread.cwd || '')}</option>`).join('');
+        if ([...select.options].some(option => option.value === selected)) select.value = selected;
+      }
+      updateThreadNote();
+    }
+
+    function updateThreadNote() {
+      const selected = state.threads.find(thread => thread.id === byId('threadSelect').value);
+      byId('threadNote').textContent = selected
+        ? t('conversation.details', {cwd:selected.cwd || '—', preview:String(selected.preview || '').slice(0, 320)})
+        : (byId('projectSelect').value ? t('conversation.empty') : t('conversation.selectProject'));
+    }
+
+    function renderWorkspaces() {
+      const list = byId('workspaceList');
+      if (!state.workspaceRoots.length) {
+        list.innerHTML = `<div class="selection-note">${esc(t('workspace.empty'))}</div>`;
+        return;
+      }
+      if (!state.workspaceRoots.includes(state.primaryWorkspace)) state.primaryWorkspace = state.workspaceRoots[0];
+      list.innerHTML = state.workspaceRoots.map((path, index) => `<div class="workspace-row"><label class="primary-choice"><input type="radio" name="primary_workspace_choice" data-primary-workspace="${index}" ${path === state.primaryWorkspace ? 'checked' : ''}><span>${esc(t('workspace.primary'))}</span></label><span class="workspace-path" title="${esc(path)}">${esc(path)}</span><button class="btn" type="button" data-remove-workspace="${index}">${esc(t('actions.remove'))}</button></div>`).join('');
+    }
+
+    async function selectProject() {
+      const projectId = byId('projectSelect').value;
+      const project = state.projects.find(item => item.id === projectId);
+      state.workspaceRoots = (project?.roots || []).map(root => root.path);
+      state.primaryWorkspace = state.workspaceRoots[0] || null;
+      state.threads = [];
+      renderWorkspaces();
+      byId('threadSelect').innerHTML = `<option value="">${esc(t('conversation.loading'))}</option>`;
+      byId('threadNote').textContent = projectId ? t('conversation.loading') : t('conversation.selectProject');
+      if (!projectId) { renderThreads(); return; }
+      try {
+        state.threads = await request(`/api/codex/projects/${encodeURIComponent(projectId)}/threads`);
+        renderThreads();
+      } catch (error) {
+        state.threads = [];
+        byId('threadSelect').innerHTML = `<option value="">${esc(error.message)}</option>`;
+        byId('threadNote').textContent = error.message;
+      }
+    }
+
+    function toggleConversationMode() {
+      const mode = document.querySelector('input[name="conversation_mode"]:checked')?.value || 'existing';
+      byId('existingConversationPanel').hidden = mode !== 'existing';
+      byId('newConversationPanel').hidden = mode !== 'new';
+      byId('threadSelect').disabled = mode !== 'existing';
+    }
+
+    function addWorkspace() {
+      const input = byId('workspaceInput');
+      const path = input.value.trim();
+      if (!path || state.workspaceRoots.includes(path)) return;
+      state.workspaceRoots.push(path);
+      state.primaryWorkspace ||= path;
+      input.value = '';
+      renderWorkspaces();
     }
 
     function detailItem(label, value) { return `<div class="detail-item"><span class="label">${esc(label)}</span><span class="value">${esc(value ?? '—')}</span></div>`; }
@@ -595,7 +674,8 @@ DASHBOARD = r"""<!doctype html>
           [t('detail.failures'), `${task.failure_count || 0} / ${task.max_attempts}`], [t('detail.latestTurn'), latest.turn_id || '—'],
           [t('detail.worker'), task.worker?.worker_id || '—'], [t('detail.dependencies'), (task.depends_on || []).join(', ') || t('common.none')],
           [t('detail.taskGroup'), task.task_group_id || '—'], [t('detail.codexProject'), task.codex_project_id || '—'],
-          [t('detail.sessionParent'), task.session_parent_task_id || '—'], [t('detail.workspaceMode'), task.workspace_mode || '—'],
+          [t('detail.conversationMode'), task.conversation_mode || '—'], [t('detail.conversationCwd'), task.conversation_cwd || '—'],
+          [t('detail.workspaceRoots'), (task.runtime_workspace_roots || []).join('\n') || '—'],
           [t('detail.rootThread'), task.root_thread_id || '—'], [t('detail.activeThread'), activeThread.thread_id || '—'],
           [t('detail.worktree'), task.worktree_path || '—'], [t('detail.blockedReason'), task.blocked_reason || '—']
         ].map(item => detailItem(item[0], item[1])).join('');
@@ -655,14 +735,26 @@ DASHBOARD = r"""<!doctype html>
       body.max_attempts = Number(body.max_attempts);
       body.depends_on = body.depends_on ? body.depends_on.split(',').map(item => item.trim()).filter(Boolean) : [];
       body.acceptance_commands = body.acceptance_commands ? body.acceptance_commands.split('\n').map(item => item.trim()).filter(Boolean) : [];
-      body.reuse_parent_worktree = body.reuse_parent_worktree === 'true';
-      for (const key of ['model','reasoning_effort','profile','exclusive_group','codex_project_id','origin_thread_id','session_parent_task_id']) if (!body[key]) body[key] = null;
+      delete body.primary_workspace_choice;
+      if (body.conversation_mode === 'new') {
+        body.thread_id = null;
+        body.workspace_roots = [...state.workspaceRoots];
+        body.primary_workspace = state.primaryWorkspace;
+      } else {
+        body.workspace_roots = [];
+        body.primary_workspace = null;
+      }
+      for (const key of ['model','reasoning_effort','thread_id']) if (!body[key]) body[key] = null;
       byId('createStatus').textContent = t('messages.creating');
       try {
         const created = await request('/api/tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+        const projectId = body.codex_project_id;
         form.reset();
+        byId('projectSelect').value = projectId;
+        toggleConversationMode();
         byId('createStatus').textContent = '';
         byId('createDialog').close();
+        await selectProject();
         await refresh();
         await showTask(created.id);
       } catch (error) { byId('createStatus').textContent = error.message; }
@@ -671,13 +763,28 @@ DASHBOARD = r"""<!doctype html>
     byId('themeToggle').addEventListener('click', () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
     byId('languageSelect').addEventListener('change', event => applyLanguage(event.target.value));
     byId('searchInput').addEventListener('input', renderBoard);
-    byId('newTaskButton').addEventListener('click', () => { byId('createStatus').textContent = ''; byId('createDialog').showModal(); });
+    byId('newTaskButton').addEventListener('click', async () => {
+      byId('createStatus').textContent = '';
+      if (!byId('projectSelect').value && state.projects.length) {
+        byId('projectSelect').value = state.projects[0].id;
+        await selectProject();
+      }
+      toggleConversationMode();
+      byId('createDialog').showModal();
+    });
     document.querySelectorAll('.dialog-close').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));
     document.querySelectorAll('.pool-action').forEach(button => button.addEventListener('click', () => poolAction(button.dataset.action)));
     byId('weeklyFreeze').addEventListener('change', async event => { try { await request('/api/pool', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({freeze_on_weekly_reset:event.target.checked})}); await refresh(); } catch (error) { event.target.checked = !event.target.checked; showError(error); } });
     byId('maxWorkersInput').addEventListener('change', updateMaxWorkers);
     byId('board').addEventListener('click', event => { const card = event.target.closest('[data-task-id]'); if (card) showTask(card.dataset.taskId); });
     byId('createForm').addEventListener('submit', createTask);
+    byId('projectSelect').addEventListener('change', selectProject);
+    byId('threadSelect').addEventListener('change', updateThreadNote);
+    document.querySelectorAll('input[name="conversation_mode"]').forEach(input => input.addEventListener('change', toggleConversationMode));
+    byId('addWorkspace').addEventListener('click', addWorkspace);
+    byId('workspaceInput').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); addWorkspace(); } });
+    byId('workspaceList').addEventListener('change', event => { const index = event.target.dataset.primaryWorkspace; if (index != null) { state.primaryWorkspace = state.workspaceRoots[Number(index)]; renderWorkspaces(); } });
+    byId('workspaceList').addEventListener('click', event => { const button = event.target.closest('[data-remove-workspace]'); if (!button) return; state.workspaceRoots.splice(Number(button.dataset.removeWorkspace), 1); renderWorkspaces(); });
     byId('saveAgent').addEventListener('click', async () => { if (!state.selectedTask) return; try { const body={model:byId('detailModel').value || null, reasoning_effort:byId('detailReasoning').value || null}; await request(`/api/tasks/${encodeURIComponent(state.selectedTask.id)}/agent`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); byId('detailStatus').textContent=t('messages.saved'); await refresh(); } catch(error) { byId('detailStatus').textContent=error.message; } });
     byId('retryTask').addEventListener('click', () => taskAction('retry'));
     byId('cancelTask').addEventListener('click', () => taskAction('cancel'));

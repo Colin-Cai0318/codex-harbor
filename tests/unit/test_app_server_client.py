@@ -27,11 +27,31 @@ async def test_project_matching_and_project_bound_thread_start(tmp_path):
                 ],
                 "nextCursor": None,
             }
+        if method == "project/read":
+            return {
+                "project": {
+                    "id": "project-1",
+                    "name": "Project",
+                    "roots": [{"path": str(project_root)}],
+                }
+            }
+        if method == "thread/list":
+            return {
+                "data": [{"id": "thread-1", "projectId": "project-1"}],
+                "nextCursor": None,
+            }
         return {"thread": {"id": "thread-1"}}
 
     client.request = fake_request  # type: ignore[method-assign]
     project = await client.find_project_for_path(project_root)
     assert project and project["id"] == "project-1"
+    assert (await client.project_read("project-1"))["name"] == "Project"
+    assert (await client.thread_list(project_id="project-1"))[0]["id"] == "thread-1"
+    thread_list_params = next(
+        params for method, params in requests if method == "thread/list"
+    )
+    assert thread_list_params["projectId"] == "project-1"
+    assert "appServer" in thread_list_params["sourceKinds"]
 
     await client.thread_start(
         cwd=str(project_root),

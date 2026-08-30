@@ -65,7 +65,12 @@ CREATE TABLE IF NOT EXISTS tasks (
     reuse_parent_worktree INTEGER NOT NULL DEFAULT 0,
     worktree_owner_task_id TEXT,
     workspace_mode TEXT NOT NULL DEFAULT 'project',
-    workspace_owned INTEGER NOT NULL DEFAULT 0
+    workspace_owned INTEGER NOT NULL DEFAULT 0,
+    conversation_mode TEXT,
+    conversation_cwd TEXT,
+    runtime_workspace_roots TEXT NOT NULL DEFAULT '[]',
+    direct_prompt INTEGER NOT NULL DEFAULT 0,
+    preserve_thread_name INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_schedule ON tasks(status, priority, created_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_group ON tasks(exclusive_group, status);
@@ -340,6 +345,30 @@ class Database:
                 )
                 connection.execute(
                     "INSERT INTO schema_version(version, applied_at) VALUES(4, ?)",
+                    (now,),
+                )
+            version_five = connection.execute(
+                "SELECT 1 FROM schema_version WHERE version=5"
+            ).fetchone()
+            if version_five is None:
+                task_v5_columns = {
+                    "conversation_mode": "TEXT",
+                    "conversation_cwd": "TEXT",
+                    "runtime_workspace_roots": "TEXT NOT NULL DEFAULT '[]'",
+                    "direct_prompt": "INTEGER NOT NULL DEFAULT 0",
+                    "preserve_thread_name": "INTEGER NOT NULL DEFAULT 0",
+                }
+                current_columns = {
+                    row["name"]
+                    for row in connection.execute("PRAGMA table_info(tasks)")
+                }
+                for column, declaration in task_v5_columns.items():
+                    if column not in current_columns:
+                        connection.execute(
+                            f"ALTER TABLE tasks ADD COLUMN {column} {declaration}"
+                        )
+                connection.execute(
+                    "INSERT INTO schema_version(version, applied_at) VALUES(5, ?)",
                     (now,),
                 )
             connection.execute(

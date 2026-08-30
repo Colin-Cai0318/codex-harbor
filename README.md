@@ -37,7 +37,7 @@ worker, Codex process, or sidebar.
 - [Features](#features)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
-- [Register a local repository](#register-a-local-repository)
+- [Create a task from a Codex Project](#create-a-task-from-a-codex-project)
 - [Configuration](#configuration)
 - [Task files](#task-files)
 - [CLI reference](#cli-reference)
@@ -202,34 +202,19 @@ uv run harbor init
 uv run harbor doctor
 ```
 
-### 3. Register a repository and create a task
-
-Harbor registers an existing local Git checkout, not a GitHub URL. For example:
-
-```powershell
-uv run harbor repo add "F:\BossHunter"
-
-uv run harbor task add `
-  --repo "F:\BossHunter" `
-  --title "Improve BossHunter documentation" `
-  --prompt "Document installation, startup, and verification without changing application code" `
-  --backend windows `
-  --workspace-mode project `
-  --reasoning high `
-  --accept "git diff --check"
-```
-
-See [Register a local repository](#register-a-local-repository) for the full
-path/remote distinction, validation commands, expected output, and troubleshooting.
-
-### 4. Start Harbor
+### 3. Start Harbor
 
 ```bash
 uv run harbor daemon
 ```
 
 Open <http://127.0.0.1:8765> for the dashboard, or inspect the same state from
-another terminal:
+another terminal. Click **New task**, choose the same Codex Project used in the
+desktop app, then either choose one of its conversations or create a new one.
+Enter one task message and send it—no repository registration or extra prompt
+template is required in this flow.
+
+### 4. Inspect persistent state
 
 ```bash
 uv run harbor ps
@@ -237,107 +222,64 @@ uv run harbor task show T001
 uv run harbor history T001
 ```
 
-## Register a local repository
+## Create a task from a Codex Project
 
-### Local path versus GitHub URL
+The dashboard now follows the Codex desktop mental model:
 
-Harbor currently accepts a local path only. A GitHub URL is managed by Git for
-clone, pull, and push operations; it is not passed to `harbor repo add`.
+1. Select a **Codex Project**. Harbor loads that Project's durable conversations.
+2. Select **Existing conversation** to continue its context and cwd, or **New
+   conversation** to create a durable Codex conversation immediately.
+3. For a new conversation, add one or more absolute workspace directories and
+   select the primary one. The primary directory must be inside a Git checkout;
+   additional directories are sent as Codex runtime workspace roots.
+4. Enter the same message you would send in Codex and click **Send task**.
 
-| Value | BossHunter example | Used directly by Harbor |
-|---|---|---|
-| Local Git checkout | `F:\BossHunter` | Yes, for registration and task creation |
-| GitHub repository | [`Colin-Cai0318/BossHunter`](https://github.com/Colin-Cai0318/BossHunter) | No, it remains a Git remote |
-| Harbor database | `%LOCALAPPDATA%\CodexHarbor\harbor.db` by default | Yes, it stores registrations and task state |
+Harbor resolves and registers the primary Git root internally. A new conversation
+is assigned to the selected Project and appears in Codex as `[Txxx] title`. An
+existing conversation keeps its current name, full history, cwd, and Thread ID.
+The first Turn receives the task message verbatim. Quota recovery or mechanical
+verification failure may add a later recovery Turn to that same conversation.
 
-`repo add` does not clone a repository. If the local checkout does not exist,
-clone it first:
+### Advanced fields
 
-```powershell
-git clone https://github.com/Colin-Cai0318/BossHunter "F:\BossHunter"
+- **Model and reasoning** are agent settings, not prompt templates. Leaving them
+  empty inherits Codex defaults.
+- **Optional verification commands** run after a successful Turn. Leave them
+  empty when normal Codex completion is enough; use them for deterministic checks
+  such as `uv run pytest -q` or `git diff --check`.
+- **Dependencies, priority, retry limit, and backend** control scheduling only.
+
+The removed repository, workspace mode, origin Thread, parent workspace, and
+session-parent fields remain accepted by the legacy CLI/API for compatibility,
+but they are no longer needed for normal dashboard creation.
+
+### BossHunter example
+
+Open BossHunter in Codex as a Project rooted at `F:\BossHunter`, start Harbor,
+then choose **BossHunter → Existing conversation** (or **New conversation** with
+`F:\BossHunter` as its primary directory) and send:
+
+```text
+Review the existing README and document installation, startup, and verification without changing business code.
 ```
 
-### 1. Validate the local checkout
+No GitHub URL is entered in Harbor. Git continues to manage
+[`Colin-Cai0318/BossHunter`](https://github.com/Colin-Cai0318/BossHunter) as the
+checkout's remote.
+
+### Legacy CLI registration
+
+Scripted/YAML workflows still use explicit repository registration:
 
 ```powershell
-Test-Path -LiteralPath "F:\BossHunter"
-git -C "F:\BossHunter" rev-parse --show-toplevel
-git -C "F:\BossHunter" rev-parse --verify HEAD
-git -C "F:\BossHunter" remote -v
-```
-
-The first command should print `True`, the second should identify
-`F:/BossHunter`, and the third should resolve a commit. The remote can be named
-`origin`, `fork`, or anything else; Harbor does not depend on the remote name.
-
-> [!WARNING]
-> The default `project` workspace mode operates directly in the existing Codex
-> workspace. Its uncommitted and untracked files are visible to the task, and the
-> task's changes appear there directly. Use `--workspace-mode isolated` only when
-> you intentionally want a separate `harbor/<task-id>` worktree.
-
-### 2. Register it from the Codex Harbor checkout
-
-```powershell
-cd "E:\Tools\Codex_Harbor"
 uv run harbor repo add "F:\BossHunter"
-```
-
-Successful output resembles:
-
-```json
-{
-  "path": "F:\\BossHunter",
-  "name": "BossHunter",
-  "added_at": "2026-08-30T09:00:00+00:00"
-}
-```
-
-Repeating the command is safe: it updates the registration for the same path;
-it does not copy or modify the source checkout. The daemon does not need to be
-running for registration.
-
-### 3. Verify registration
-
-```powershell
 uv run harbor repo list
+uv run harbor task add --repo "F:\BossHunter" --title "README" --prompt "Improve the README" --workspace-mode project
 ```
 
-The output should contain `F:\\BossHunter`. If the dashboard is already open,
-refresh it. The Create Task repository selector will then show
-`BossHunter — F:\BossHunter`.
-
-### 4. Create and run an example task
-
-```powershell
-uv run harbor task add `
-  --repo "F:\BossHunter" `
-  --title "Improve BossHunter documentation" `
-  --prompt "Document installation, startup, and verification without changing application code. Summarize the result." `
-  --backend windows `
-  --reasoning high `
-  --accept "git diff --check"
-
-uv run harbor daemon
-```
-
-Open <http://127.0.0.1:8765>, or inspect the task from another terminal:
-
-```powershell
-uv run harbor task list
-uv run harbor ps
-```
-
-### Troubleshooting
-
-| Symptom | Cause and resolution |
-|---|---|
-| `repository does not exist` | The local path is wrong; verify the drive and directory, and quote paths containing spaces |
-| `repository is not registered` | The task uses another path or another Harbor data directory; rerun `repo add` and inspect `repo list` |
-| `repo list` is still empty | The CLI and daemon may use different `HARBOR_DATA_DIR` or `--config` values; both must use the same configuration |
-| A GitHub URL cannot be registered | This is expected; clone it and register the resulting local directory |
-| Local uncommitted changes are missing | Confirm the task uses `project` mode; isolated worktrees intentionally start from committed `HEAD` |
-| The dashboard selector has no new repository | Refresh the page; repository options load when the page starts |
+`repo add` accepts a local Git checkout, not a GitHub URL, and never clones or
+copies the repository. The CLI and daemon must share the same configuration and
+`HARBOR_DATA_DIR`.
 
 ## Configuration
 

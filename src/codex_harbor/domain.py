@@ -51,6 +51,11 @@ class WorkspaceMode(StrEnum):
     INHERIT = "inherit"
 
 
+class ConversationMode(StrEnum):
+    EXISTING = "existing"
+    NEW = "new"
+
+
 class ErrorType(StrEnum):
     RATE_LIMIT_5H = "RATE_LIMIT_5H"
     RATE_LIMIT_WEEKLY = "RATE_LIMIT_WEEKLY"
@@ -154,6 +159,11 @@ class TaskSpec:
     session_parent_task_id: str | None = None
     reuse_parent_worktree: bool = False
     workspace_mode: WorkspaceMode = WorkspaceMode.PROJECT
+    conversation_mode: ConversationMode | None = None
+    conversation_cwd: str | None = None
+    runtime_workspace_roots: list[str] = field(default_factory=list)
+    direct_prompt: bool = False
+    preserve_thread_name: bool = False
 
 
 @dataclass(slots=True)

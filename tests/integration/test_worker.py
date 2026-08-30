@@ -13,6 +13,7 @@ from codex_harbor.domain import (
     RuntimeTurnResult,
     TaskSpec,
     TaskStatus,
+    ThreadRole,
     SessionMode,
     WorkspaceMode,
 )
@@ -28,12 +29,14 @@ class FakeRuntime(AgentRuntime):
     def __init__(self):
         self.prompts: list[str] = []
         self.calls: list[tuple[str, str | None]] = []
+        self.cwds: list[str] = []
 
     async def start_task(
         self, cwd: str, prompt: str, config: EffectiveAgentConfig
     ) -> RuntimeTurnResult:
         self.prompts.append(prompt)
         self.calls.append(("start", None))
+        self.cwds.append(cwd)
         return RuntimeTurnResult("thread-1", "turn-1", "completed")
 
     async def resume_task(
@@ -41,6 +44,7 @@ class FakeRuntime(AgentRuntime):
     ) -> RuntimeTurnResult:
         self.prompts.append(prompt)
         self.calls.append(("resume", thread_id))
+        self.cwds.append(cwd)
         return RuntimeTurnResult(thread_id, "turn-r", "completed")
 
     async def start_turn(
@@ -48,6 +52,7 @@ class FakeRuntime(AgentRuntime):
     ) -> RuntimeTurnResult:
         self.prompts.append(prompt)
         self.calls.append(("turn", thread_id))
+        self.cwds.append(cwd)
         return RuntimeTurnResult(thread_id, f"turn-{len(self.prompts)}", "completed")
 
     async def inspect_thread(self, thread_id: str) -> dict:
@@ -140,6 +145,44 @@ async def test_worker_persists_thread_attempt_envelope_and_succeeds(
             "SELECT thread_id FROM attempts WHERE task_id=?", (task["id"],)
         ).fetchone()
     assert attempt["thread_id"] == "thread-1"
+
+
+@pytest.mark.asyncio
+async def test_project_conversation_task_injects_raw_message_into_selected_thread(
+    repository, git_repo, tmp_path, config_values
+):
+    conversation_cwd = git_repo / "nested-codex-cwd"
+    conversation_cwd.mkdir()
+    task = repository.create_task(
+        TaskSpec(
+            title="direct message",
+            repository=str(git_repo),
+            prompt="Continue exactly with this user message",
+            direct_prompt=True,
+            preserve_thread_name=True,
+            conversation_cwd=str(conversation_cwd),
+            runtime_workspace_roots=[str(git_repo)],
+        )
+    )
+    repository.set_thread(task["id"], "existing-thread", ThreadRole.ROOT)
+    runtime = FakeRuntime()
+    worker = Worker(
+        repository,
+        runtime,
+        ModelRegistry(MODELS),
+        WorktreeManager(repository, tmp_path / "worktrees"),
+        AcceptanceRunner(select_backend("local")),
+        config_values,
+        tmp_path / "data",
+        "direct-message-worker",
+    )
+
+    await worker.run(repository.claim_next("direct-message-worker"))
+
+    assert repository.get_task(task["id"])["status"] == TaskStatus.SUCCEEDED
+    assert runtime.calls == [("resume", "existing-thread")]
+    assert runtime.cwds == [str(conversation_cwd)]
+    assert runtime.prompts == ["Continue exactly with this user message"]
 
 
 @pytest.mark.asyncio

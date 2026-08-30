@@ -13,7 +13,7 @@ Command:
 uv run pytest -q
 ```
 
-Result: 30 passed, with 67% statement coverage. The suite covers state transitions, dependency release and terminal-failure propagation, transactional admission behavior, priority, exclusive groups, persisted runtime parallelism, weekly drain/freeze semantics, model capability rejection, pending agent configuration, secret sanitization, HTTP API/dashboard rendering, JavaScript syntax validation, real temporary Git worktrees, existing Project workspace reuse, shared-session prompt injection, Task↔Thread many-to-many links, atomic YAML task-group import, Acceptance Runner behavior, Worker thread/turn/envelope persistence, quota wait/resume on the same Thread, historical quota-failure migration, and successful/blocked outcomes.
+Result: 34 passed, 68% statement coverage (83 dependency deprecation warnings). The suite covers state transitions, dependency release and terminal-failure propagation, transactional admission behavior, priority, exclusive groups, persisted runtime parallelism, weekly drain/freeze semantics, model capability rejection, pending agent configuration, secret sanitization, HTTP API/dashboard rendering, emitted JavaScript syntax, Project-filtered conversation listing, durable new-conversation creation, runtime workspace roots, exact conversation-cwd preservation, raw first-message injection into an existing conversation, schema-v5 persistence, real temporary Git worktrees, existing Project workspace reuse, shared-session prompt injection, Task↔Thread many-to-many links, atomic YAML task-group import, Acceptance Runner behavior, Worker thread/turn/envelope persistence, quota wait/resume on the same Thread, historical quota-failure migration, and successful/blocked outcomes.
 
 ## Codex Project and existing workspace integration
 
@@ -21,7 +21,33 @@ The current Codex CLI generated protocol schema was inspected locally. It define
 
 Without starting a Turn, live `thread/metadata/update` calls assigned both the current development conversation and the historical T001 Thread to that existing Project. A project-filtered `thread/list` returned both IDs with the expected `projectId`; the current conversation retained cwd `E:\Tools\Codex_Harbor`. The historical T001 retained its old `C:\Users\19443\AppData\Local\CodexHarbor\worktrees\T001` cwd instead of being moved, protecting any legacy task state. New deterministic Worker coverage proves that two shared-session Tasks use one Thread, both operate in the registered existing workspace, inject the second prompt with prior-task context, and create no task worktree directories.
 
-The user's live v2 database was opened read-only and copied through SQLite's online backup API into a process-scoped temporary directory. Migrating that copy produced schema versions 1–4, retained T001's Root Thread link, populated `task_thread_links`, and marked its historical worktree as legacy Harbor-owned. The temporary backup was removed automatically; the live database was not migrated during this validation because no daemon was running and starting one would change task state.
+The earlier v2 validation used a read-only copy and left the live database unchanged. During the Project-conversation E2E run below, `harbor doctor` and the daemon safely migrated the live database through schema version 5. A recoverable pre-E2E snapshot is retained at `%LOCALAPPDATA%\CodexHarbor\backups\harbor-pre-e2e-20260830.db`.
+
+## Project-driven creation and real example tasks
+
+Three tasks were created through the live loopback API against the existing
+`Codex Harbor` Project (`01a05029-18b6-7b32-bcce-6367259f1f3d`). The primary
+workspace was the ignored E-drive fixture
+`E:\Tools\Codex_Harbor\.harbor\e2e-project`; no task worktree was created under
+the C-drive data directory.
+
+| Task | Creation mode | Codex Thread | Result | Evidence |
+|---|---|---|---|---|
+| T002 | New conversation, two runtime workspace roots | `01a0534c-c43b-7300-8fc2-4957179f5d7e` | `SUCCEEDED`, 1 Turn, 0 failures | Read `context.txt` from the second root; wrote the exact token and `NEW_CONVERSATION_OK`; three acceptance commands passed |
+| T003 | Existing conversation selected from the Project | same Thread as T002 | `SUCCEEDED`, 1 Turn, 0 failures | Appended `CONTINUATION_SAME_SESSION_OK`; retained the T002 conversation name and cwd; four acceptance commands passed |
+| T004 | New conversation, no acceptance commands | `01a0534d-f199-7b30-a97c-9afb8ef5caa2` | `SUCCEEDED`, 1 Turn, 0 failures | Wrote `NO_ACCEPTANCE_COMMAND_OK`; normal Codex Turn completion was sufficient |
+
+The Project-filtered live conversation list returned both new Threads with
+source `vscode`, cwd equal to the E-drive fixture, and names prefixed `[T002]`
+and `[T004]`. T003 deliberately did not rename the selected T002 conversation.
+The persisted task rows have `direct_prompt=1`; T003 also has
+`preserve_thread_name=1`. The live account remained available after the run
+(77% of the five-hour window and 49% of the weekly window remained at the final
+observation).
+
+The fixture remains Git-ignored for inspection. Its source commit is unchanged;
+only `result.txt` and `no-acceptance.txt` are untracked test outputs. The daemon
+was shut down cleanly after recording the results.
 
 ## Real 5-hour limit incident and repair
 
@@ -61,9 +87,17 @@ This run found a false Weekly Reset classification caused by a provider revising
 
 `harbor doctor` passed Python, SQLite, Git, Codex executable resolution, App Server initialization, account read, dynamic Model Registry (six models observed), execution backend, database, and filesystem checks.
 
-A real daemon served the dashboard at `127.0.0.1:8765`; `/api/pool`, `/api/models`, the create-task form, task detail view, and the plugin's loopback API helper were exercised successfully. Repeated quota refreshes left the pool `RUNNING`, confirming the Weekly Reset regression fix against the live structured provider.
+A real daemon served the dashboard at `127.0.0.1:8765`; `/api/pool`, `/api/models`, `/api/codex/projects`, project-filtered conversation loading, Project-driven task creation, task detail view, and the plugin's loopback API helper were exercised successfully. Repeated quota refreshes left the pool `RUNNING`, confirming the Weekly Reset regression fix against the live structured provider.
 
 The follow-up card-based task board was rendered in both light and dark themes with Microsoft Edge at 1600×1100. A populated preview verified lifecycle-lane placement and exact task status badges. A Simplified Chinese render additionally verified translated static/dynamic UI, the persistent language selector, and quota cards whose primary value is the remaining allowance. The integration suite parses the emitted JavaScript with Node.js so Python string escaping cannot silently break browser startup again.
+
+After the Project-driven redesign, Edge DevTools Protocol QA opened the actual
+creation dialog against the live daemon. It loaded nine Projects and four
+conversations for the selected Codex Harbor Project. The existing-conversation
+view displayed the conversation name, cwd, and preview; switching to new mode
+hid that panel, showed the workspace-root editor, and populated the Project root
+as the initial primary directory. Dark-theme screenshots are retained under the
+Git-ignored `.harbor/` directory.
 
 ## Unverified release boundaries
 

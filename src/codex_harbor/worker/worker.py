@@ -183,6 +183,8 @@ class Worker:
     ) -> None:
         if not isinstance(self.runtime, CodexAppServerRuntime):
             return
+        if task.get("preserve_thread_name") and not recovery:
+            return
         suffix = " · Recovery" if recovery else ""
         group = task.get("task_group")
         name = (
@@ -352,6 +354,7 @@ class Worker:
         envelope: RecoveryEnvelope,
         project_id: str | None,
     ) -> RuntimeTurnResult:
+        codex_cwd = str(task.get("conversation_cwd") or worktree)
         threads = task.get("threads", [])
         active_thread = (
             threads[-1]["thread_id"] if threads else task.get("root_thread_id")
@@ -364,7 +367,10 @@ class Worker:
                 else None
             )
             prompt = (
-                continuation_prompt(task, parent)
+                task["prompt"]
+                if task.get("direct_prompt")
+                and int(task.get("current_attempt", 0)) == 0
+                else continuation_prompt(task, parent)
                 if parent
                 else build_recovery_prompt(envelope)
             )
@@ -375,7 +381,7 @@ class Worker:
                     )
                 await self._name_thread(task, active_thread)
                 result = await self.runtime.resume_task(
-                    active_thread, str(worktree), prompt, config
+                    active_thread, codex_cwd, prompt, config
                 )
                 self.repository.add_event(
                     task["id"],
@@ -388,7 +394,7 @@ class Worker:
                     try:
                         forked = await self.runtime.client.thread_fork(
                             active_thread,
-                            cwd=str(worktree),
+                            cwd=codex_cwd,
                             model=config.effective_model,
                         )
                         thread = forked.get("thread", forked)
@@ -411,18 +417,20 @@ class Worker:
                             self.data_dir / "tasks" / task["id"] / "recovery.json"
                         )
                         return await self.runtime.start_turn(
-                            fork_id, str(worktree), prompt, config
+                            fork_id, codex_cwd, prompt, config
                         )
                     except AppServerError:
                         pass
         if isinstance(self.runtime, CodexAppServerRuntime):
             started = await self.runtime.client.thread_start(
-                cwd=str(worktree),
+                cwd=codex_cwd,
                 model=config.effective_model,
                 approval_policy=self.runtime.approval_policy,
                 sandbox=self.runtime.sandbox,
                 project_id=project_id,
-                runtime_workspace_roots=[str(worktree)],
+                runtime_workspace_roots=(
+                    task.get("runtime_workspace_roots") or [str(worktree)]
+                ),
             )
             thread = started.get("thread", started)
             thread_id = str(thread.get("id") or thread.get("threadId"))
@@ -443,11 +451,23 @@ class Worker:
             )
             envelope.thread_id = thread_id
             envelope.write(self.data_dir / "tasks" / task["id"] / "recovery.json")
-            return await self.runtime.start_turn(
-                thread_id, str(worktree), initial_prompt(task), config
+            prompt = (
+                task["prompt"]
+                if task.get("direct_prompt")
+                and int(task.get("current_attempt", 0)) == 0
+                else initial_prompt(task)
             )
+            return await self.runtime.start_turn(
+                thread_id, codex_cwd, prompt, config
+            )
+        prompt = (
+            task["prompt"]
+            if task.get("direct_prompt")
+            and int(task.get("current_attempt", 0)) == 0
+            else initial_prompt(task)
+        )
         result = await self.runtime.start_task(
-            str(worktree), initial_prompt(task), config
+            codex_cwd, prompt, config
         )
         self.repository.set_thread(
             task["id"], result.thread_id, ThreadRole.ROOT, model=config.effective_model
@@ -566,7 +586,10 @@ class Worker:
                             else build_recovery_prompt(envelope)
                         )
                         result = await self.runtime.start_turn(
-                            thread_id, str(worktree), prompt, config
+                            thread_id,
+                            str(task.get("conversation_cwd") or worktree),
+                            prompt,
+                            config,
                         )
                     self.repository.bind_attempt_thread(
                         task["id"], attempt, result.thread_id, result.turn_id

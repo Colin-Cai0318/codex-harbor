@@ -42,6 +42,7 @@ async def serve(config_path: str | None = None) -> None:
             model_registry=registry,
             profiles=values.get("profiles", {}),
             app_server_client=client,
+            codex_settings=values.get("codex", {}),
         )
         server = uvicorn.Server(
             uvicorn.Config(

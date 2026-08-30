@@ -34,6 +34,10 @@ def row_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
         result["acceptance_commands"] = json.loads(
             result["acceptance_commands"] or "[]"
         )
+    if "runtime_workspace_roots" in result:
+        result["runtime_workspace_roots"] = json.loads(
+            result["runtime_workspace_roots"] or "[]"
+        )
     return result
 
 
@@ -157,8 +161,10 @@ class HarborRepository:
                 priority, created_at, updated_at, max_attempts, acceptance_commands,
                 model, reasoning_effort, profile, exclusive_group, task_group_id,
                 codex_project_id, origin_thread_id, session_parent_task_id,
-                reuse_parent_worktree, workspace_mode
-            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                reuse_parent_worktree, workspace_mode, conversation_mode,
+                conversation_cwd, runtime_workspace_roots, direct_prompt,
+                preserve_thread_name
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 task_id,
                 spec.title,
@@ -187,6 +193,11 @@ class HarborRepository:
                 spec.session_parent_task_id,
                 int(spec.reuse_parent_worktree),
                 WorkspaceMode(spec.workspace_mode),
+                spec.conversation_mode,
+                spec.conversation_cwd,
+                json.dumps(spec.runtime_workspace_roots),
+                int(spec.direct_prompt),
+                int(spec.preserve_thread_name),
             ),
         )
         conn.executemany(

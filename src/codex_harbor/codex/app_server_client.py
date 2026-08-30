@@ -304,6 +304,39 @@ class AppServerClient:
             if not cursor:
                 return projects
 
+    async def project_read(self, project_id: str) -> dict[str, Any]:
+        result = await self.request("project/read", {"projectId": project_id})
+        return result.get("project", result)
+
+    async def thread_list(
+        self, *, project_id: str, archived: bool = False
+    ) -> list[dict[str, Any]]:
+        threads: list[dict[str, Any]] = []
+        cursor: str | None = None
+        while True:
+            result = await self.request(
+                "thread/list",
+                {
+                    "projectId": project_id,
+                    "archived": archived,
+                    "cursor": cursor,
+                    "limit": 100,
+                    "sortKey": "updated_at",
+                    "sortDirection": "desc",
+                    "sourceKinds": [
+                        "cli",
+                        "vscode",
+                        "exec",
+                        "appServer",
+                        "unknown",
+                    ],
+                },
+            )
+            threads.extend(result.get("data", []))
+            cursor = result.get("nextCursor")
+            if not cursor:
+                return threads
+
     async def find_project_for_path(
         self, path: str | Path
     ) -> dict[str, Any] | None:

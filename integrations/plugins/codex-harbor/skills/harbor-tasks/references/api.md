@@ -10,10 +10,45 @@ Base URL: `http://127.0.0.1:8765`
 | Agent config | `PATCH /api/tasks/{id}/agent` |
 | Lifecycle | `POST /api/tasks/{id}/retry`, `POST /api/tasks/{id}/cancel` |
 | Pool | `GET /api/pool`, `PATCH /api/pool`, `POST /api/pool/pause`, `/freeze`, `/resume` |
-| Runtime | `GET /api/quota`, `GET /api/models`, `GET /api/profiles`, `GET /api/workers`, `GET /api/codex/projects` |
+| Runtime | `GET /api/quota`, `GET /api/models`, `GET /api/profiles`, `GET /api/workers`, `GET /api/codex/projects`, `GET /api/codex/projects/{id}/threads` |
 | History | `GET /api/events?task_id=T001&limit=200` |
 
-Task creation body:
+Project-driven task creation body (preferred):
+
+```json
+{
+  "codex_project_id": "01a05029-18b6-7b32-bcce-6367259f1f3d",
+  "conversation_mode": "existing",
+  "thread_id": "01a05029-2856-77b1-b099-6262d7ca67cd",
+  "message": "Continue this conversation and implement the requested change.",
+  "priority": 100,
+  "depends_on": [],
+  "acceptance_commands": [],
+  "max_attempts": 5,
+  "model": null,
+  "reasoning_effort": null,
+  "execution_backend": "local"
+}
+```
+
+For `"conversation_mode": "new"`, omit `thread_id` and supply:
+
+```json
+{
+  "primary_workspace": "E:\\Tools\\Codex_Harbor",
+  "workspace_roots": [
+    "E:\\Tools\\Codex_Harbor",
+    "F:\\shared-context"
+  ]
+}
+```
+
+The primary workspace must be inside a Git checkout. Harbor auto-registers its
+Git top-level, starts a durable Thread assigned to the selected Project, and
+sends `message` verbatim on the first Turn. Existing conversations keep their
+Thread ID, name, history, and cwd.
+
+Legacy task creation body:
 
 ```json
 {

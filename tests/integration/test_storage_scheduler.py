@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from codex_harbor.domain import (
+    ConversationMode,
     EffectiveAgentConfig,
     ErrorType,
     PoolStatus,
@@ -32,6 +33,38 @@ def test_max_workers_migration_seed_and_runtime_setting_persist(tmp_path):
     database.migrate(max_workers=9, now=utc_now())
     assert repository.get_pool()["max_workers"] == 5
     assert repository.list_events()[-1]["event_type"] == "POOL_MAX_WORKERS_CHANGED"
+
+
+def test_project_conversation_fields_persist_in_schema_v5(repository, git_repo):
+    task = repository.create_task(
+        TaskSpec(
+            task_id="T001",
+            title="direct project conversation",
+            repository=str(git_repo),
+            prompt="Continue this Codex conversation exactly as written.",
+            codex_project_id="project-1",
+            conversation_mode=ConversationMode.NEW,
+            conversation_cwd=str(git_repo),
+            runtime_workspace_roots=[str(git_repo), str(git_repo.parent)],
+            direct_prompt=True,
+            preserve_thread_name=True,
+        )
+    )
+
+    assert task["conversation_mode"] == ConversationMode.NEW
+    assert task["conversation_cwd"] == str(git_repo)
+    assert task["runtime_workspace_roots"] == [
+        str(git_repo),
+        str(git_repo.parent),
+    ]
+    assert task["direct_prompt"] == 1
+    assert task["preserve_thread_name"] == 1
+    with repository.db.connect() as connection:
+        versions = {
+            row["version"]
+            for row in connection.execute("SELECT version FROM schema_version")
+        }
+    assert 5 in versions
 
 
 @pytest.mark.asyncio
