@@ -51,12 +51,20 @@ class WorktreeManager:
         if existing:
             current = Path(existing).resolve()
             if current.is_dir() and self.root in current.parents:
-                return current
+                validated = await self.use_existing_workspace(repo, current)
+                if validated != current:
+                    raise GitError(
+                        f"owned worktree path is not a Git root: {current}"
+                    )
+                return validated
         target = (self.root / task_id).resolve()
         if self.root not in target.parents:
             raise GitError("worktree path escaped Harbor worktree root")
         if target.exists():
-            return target
+            validated = await self.use_existing_workspace(repo, target)
+            if validated != target:
+                raise GitError(f"owned worktree path is not a Git root: {target}")
+            return validated
         branch = f"harbor/{task_id}"
         branch_exists = False
         try:

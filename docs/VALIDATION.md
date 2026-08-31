@@ -13,7 +13,7 @@ Command:
 uv run pytest -q
 ```
 
-Result: 39 passed, 70% statement coverage (119 dependency deprecation warnings on Python 3.14). The suite covers state transitions, dependency release and terminal-failure propagation, transactional admission behavior, priority, exclusive groups, persisted runtime parallelism, weekly drain/freeze/resume semantics, structured Codex quota parsing, model capability rejection, pending agent configuration, secret sanitization, HTTP API/dashboard rendering, emitted JavaScript syntax, Project-filtered conversation listing, durable new-conversation creation, runtime workspace roots, exact conversation-cwd preservation, raw first-message injection into an existing conversation, schema-v5 persistence, real temporary Git worktrees, existing Project workspace reuse, shared-session prompt injection, Task↔Thread many-to-many links, atomic YAML task-group import, Acceptance Runner behavior, Worker thread/turn/envelope persistence, quota wait/resume on the same Thread, historical quota-failure migration, and successful/blocked outcomes.
+Result: 73 passed, 86% statement coverage (335 dependency deprecation warnings on Python 3.14). The suite covers state transitions, dependency release and terminal-failure propagation, transactional admission behavior, priority, exclusive groups, persisted runtime parallelism, weekly drain/freeze/resume semantics, structured Codex quota parsing, model capability rejection, pending agent configuration, secret sanitization, HTTP API/dashboard rendering, emitted JavaScript syntax, Project-filtered conversation listing, durable new-conversation creation, runtime workspace roots, exact conversation-cwd preservation, raw first-message injection into an existing conversation, schema-v5 persistence, real temporary Git worktrees, existing Project workspace reuse, shared-session prompt injection, Task↔Thread many-to-many links, atomic YAML task-group import, Acceptance Runner behavior, Worker thread/turn/envelope persistence, quota wait/resume on the same Thread, historical quota-failure migration, successful/blocked outcomes, and the fault-injection matrix below.
 
 ## Simulated quota lifecycle (2026-08-31)
 
@@ -72,21 +72,47 @@ file, both acceptance commands passed, and T005 ended `SUCCEEDED` with two
 Attempts and one counted acceptance failure. This is a live confirmation of
 same-Thread acceptance recovery, not a claim that a real quota reset occurred.
 
+## Simulated fault-injection matrix (2026-08-31)
+
+All cases below use temporary repositories/databases or in-process fakes. They
+do not submit a real Codex Turn, change the live Harbor database, or consume
+model quota.
+
+| Boundary | Injected failure | Verified behavior |
+|---|---|---|
+| App Server transport | write failure, request timeout, error response, malformed JSON, stdout close, notification timeout | Errors propagate; pending requests and notification waiters are removed; malformed lines are ignored without stopping the reader |
+| App Server requests | approval and unknown interactive requests | Non-interactive Harbor declines approval and returns JSON-RPC method-not-found for unsupported prompts instead of hanging |
+| Runtime/Session | failed `thread/resume`, successful/failed `thread/fork`, malformed Thread/Turn IDs, wait failure, interrupt | Recovery first forks the existing session, then creates a new recovery Thread only if both resume and fork fail; active-Turn bookkeeping is always cleared |
+| Recovery Manager | stale heartbeat/dead PID beside a live PID | Only the stale task returns to `READY`; `TASK_RECOVERY_QUEUED` and `WORKER_DIED` are persisted; the live Worker remains registered |
+| Worker outcomes | auth, network, generic runtime failure, cancellation during Turn, repeated acceptance failure | Auth blocks, network enters delayed retry, exhausted generic/acceptance failures fail, cancellation remains cancelled, and Worker rows/claims are cleaned |
+| Scheduler | crashed Worker future, interrupt transport error, quota-provider exception, expired retry, stop with active future | Each failure is isolated and recorded; scheduling survives; retry is released; stop waits for active work |
+| Execution | real local command timeout, missing PID termination, simulated WSL success/timeout, unsupported backend | Timeout returns 124 and terminates the process tree; WSL invocation shape and timeout are deterministic; unsupported backend is rejected |
+| Worktree | unregistered/nested repository, missing/conflicting directory, another repository, Git failure, unsafe cleanup | Every invalid path is rejected. Existing Harbor-owned directories are now Git-root and common-repository validated before reuse |
+| API | App Server unavailable, missing/mismatched Project or conversation, absent/non-Git workspace, malformed `thread/start`, invalid controls | Responses use explicit 404/409/502/503 boundaries; a partially created task is rolled back if Thread creation is malformed |
+| Daemon | normal server return and bind failure | Scheduler task is cancelled, `scheduler.stop()` runs, and the App Server context closes in both cases |
+| CLI/config | malformed TOML/YAML, missing fields, invalid cleanup/config, control commands, quota display | Invalid inputs fail explicitly; normal control paths persist; CLI quota output now shows remaining allowance instead of used allowance |
+
+The simulations found and fixed three production defects: App Server write
+failures leaked `_pending` futures, notification timeouts leaked waiter entries,
+and a pre-existing directory under the Harbor worktree root could be reused
+without proving Git ownership. The CLI's primary quota display was also aligned
+with the dashboard by showing remaining allowance.
+
 ## Remaining coverage gaps
 
-The suite moved from 68% to 70%. The remaining uncovered statements are
-concentrated in process/error paths rather than the quota lifecycle tested here:
+The suite moved from 68% before quota work, through 70%, to 86%. Remaining risk
+is now concentrated in live process/host behavior and low-frequency storage
+combinations:
 
-| Area | Coverage | Important missing tests |
+| Area | Coverage | Remaining qualification |
 |---|---:|---|
-| Codex App Server client and runtime adapter | 36% / 33% | malformed JSON-RPC, stdio shutdown, notification timeout, approval request denial, fork failure, interrupt failure, and live protocol error variants |
-| Daemon lifecycle | 37% | bind/start failure, signal shutdown, scheduler/API coordinated teardown, and partial initialization failure |
-| Recovery Manager and Worker | 32% / 61% | stale PID recovery, resume-then-fork fallback, recovery-thread failure, cancellation during a Turn, auth/Git/network terminal branches, and exhausting acceptance retries |
-| CLI and Local API | 48% / 79% | most CLI import/control/error-output branches; invalid Project/thread/workspace combinations and App Server unavailable responses |
-| Execution backends | 47% | command timeout, process-tree termination, WSL launch/path behavior, and unsupported-host branches |
-| Scheduler | 77% | Worker crash reaping, cancellation interrupt failure, quota-provider exceptions, retry-delay release, and `run_forever`/`stop` lifecycle |
-| Git worktree manager | 76% | conflicting/missing worktrees, Git command failures, ownership-safe cleanup rejection, and locked-file behavior |
-| Storage/config | 85% / 84% | rollback/error branches, older partial-schema combinations, malformed config, and high-contention SQLite claims |
+| Codex App Server client | 63% | real subprocess startup/close escalation and additional live protocol-version response shapes |
+| Daemon lifecycle | 79% | OS signal delivery and initialization failure before scheduler construction |
+| Recovery Manager / Worker | 100% / 87% | destructive real-process kill during active edits and rare Project-metadata/inherited-workspace error combinations |
+| CLI / Local API | 73% / 92% | subprocess-level `doctor`, `run`, `daemon`, and parser exit formatting; several low-risk endpoint variants |
+| Execution / Scheduler | 93% / 94% | Linux Native host matrix, real WSL process tree, and long-running `run_forever` soak |
+| Git worktree manager | 83% | real locked-file cleanup and existing-branch worktree-add behavior |
+| Storage / repository / config | 89% / 93% / 89% | older partial-schema permutations, forced rollback faults, and high-contention multi-process SQLite claims |
 
 `__main__.py` reports 0%, but it is only the four-line CLI entry point and is not
 a material risk. Live `doctor`, daemon, Edge, and App Server smoke proofs exercise

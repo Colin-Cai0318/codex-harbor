@@ -235,12 +235,14 @@ def _print_ps(container: ApplicationContainer) -> None:
     )
     for name in ("PRIMARY_5H", "WEEKLY"):
         quota = quotas.get(name, {})
-        used = (
+        remaining = (
             "unknown"
-            if quota.get("used_percent") is None
-            else f"{quota['used_percent']:.0f}% used"
+            if quota.get("remaining") is None
+            else f"{quota['remaining']:.0f}% remaining"
         )
-        print(f"{name:<10} {used:<14} reset {quota.get('reset_at') or 'unknown'}")
+        print(
+            f"{name:<10} {remaining:<18} reset {quota.get('reset_at') or 'unknown'}"
+        )
     print("\nID       STATUS        AGENT                    TITLE")
     for task in container.repository.list_tasks():
         agent = f"{task.get('model') or 'default'}/{task.get('reasoning_effort') or 'default'}"

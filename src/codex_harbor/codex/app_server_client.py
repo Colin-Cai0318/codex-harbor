@@ -141,8 +141,8 @@ class AppServerClient:
         message: dict[str, Any] = {"id": request_id, "method": method}
         if params is not None:
             message["params"] = params
-        await self._write(message)
         try:
+            await self._write(message)
             response = await asyncio.wait_for(future, timeout or self.request_timeout)
         finally:
             self._pending.pop(request_id, None)
@@ -230,7 +230,14 @@ class AppServerClient:
         )
         self._notification_waiters[method].append(future)
         while True:
-            message = await asyncio.wait_for(future, timeout or 3600)
+            try:
+                message = await asyncio.wait_for(future, timeout or 3600)
+            finally:
+                waiters = self._notification_waiters.get(method, [])
+                if future in waiters:
+                    waiters.remove(future)
+                if not waiters:
+                    self._notification_waiters.pop(method, None)
             if predicate is None or predicate(message):
                 return message
             future = asyncio.get_running_loop().create_future()
