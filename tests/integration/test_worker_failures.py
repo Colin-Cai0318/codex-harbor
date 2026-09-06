@@ -224,3 +224,34 @@ async def test_resume_failure_forks_then_falls_back_to_new_thread(
     assert finished["status"] == TaskStatus.SUCCEEDED
     assert finished["threads"][-1]["thread_id"] == expected_thread
     assert client.started == new_starts
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error,expected", [
+    ("usageLimitExceeded", TaskStatus.WAIT_QUOTA),
+    ("authentication required", TaskStatus.BLOCKED),
+    ("network timeout", TaskStatus.RETRY_WAIT),
+])
+async def test_transient_resume_error_never_forks_session(
+    repository, git_repo, tmp_path, config_values, error, expected
+):
+    class Client(ForkingClient):
+        async def thread_resume(self, thread_id, **kwargs):
+            raise AppServerError(error)
+
+        async def thread_fork(self, *args, **kwargs):
+            pytest.fail("transient errors must retain the existing session")
+
+    task = repository.create_task(TaskSpec(
+        title="preserve session", repository=str(git_repo), prompt="continue"
+    ))
+    repository.set_thread(task["id"], "thread-old", ThreadRole.ROOT)
+    client = Client()
+    worker = worker_for(repository, CodexAppServerRuntime(client), git_repo,
+                        tmp_path, config_values, "preserve-worker")
+    await worker.run(repository.claim_next("preserve-worker"))
+    finished = repository.get_task(task["id"])
+    assert finished["status"] == expected
+    assert finished["root_thread_id"] == "thread-old"
+    assert len(finished["threads"]) == 1
+    assert client.started == 0

@@ -123,7 +123,7 @@ def test_malformed_thread_start_rolls_back_task(repository, git_repo):
             "conversation_mode": "new",
         },
     )
-    assert response.status_code == 500
+    assert response.status_code == 502
     assert repository.list_tasks() == before
 
 

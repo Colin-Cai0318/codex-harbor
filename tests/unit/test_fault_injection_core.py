@@ -101,6 +101,8 @@ async def test_scheduler_contains_worker_crash_interrupt_and_quota_provider_fail
     scheduler.running[task["id"]] = crashed
     scheduler._reap()
     assert task["id"] not in scheduler.running
+    assert repository.get_task(task["id"])["status"] == TaskStatus.BLOCKED
+    assert repository.get_task(task["id"])["claimed_by"] is None
 
     repository.set_thread(task["id"], "thread-1", "ROOT")
     repository.cancel_task(task["id"])

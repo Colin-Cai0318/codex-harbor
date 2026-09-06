@@ -45,9 +45,15 @@ class AppServerClient:
             defaultdict(list)
         )
         self.stderr_lines: list[str] = []
+        self._notification_predicates: dict[asyncio.Future, Any] = {}
+        self._stream_error: AppServerError | None = None
 
     async def __aenter__(self) -> Self:
-        await self.start()
+        try:
+            await self.start()
+        except BaseException:
+            await self.close()
+            raise
         return self
 
     async def __aexit__(
@@ -61,6 +67,7 @@ class AppServerClient:
     async def start(self) -> None:
         if self.process and self.process.returncode is None:
             return
+        self._stream_error = None
         self.process = await asyncio.create_subprocess_exec(
             self.executable,
             "app-server",
@@ -110,6 +117,16 @@ class AppServerClient:
             if not future.done():
                 future.set_exception(AppServerError("app server closed"))
         self._pending.clear()
+        self._fail_notification_waiters("app server closed")
+
+    def _fail_notification_waiters(self, message: str) -> None:
+        self._stream_error = AppServerError(message)
+        for waiters in self._notification_waiters.values():
+            for future in waiters:
+                if not future.done():
+                    future.set_exception(self._stream_error)
+        self._notification_waiters.clear()
+        self._notification_predicates.clear()
 
     async def _write(self, message: dict[str, Any]) -> None:
         if (
@@ -166,6 +183,8 @@ class AppServerClient:
                 message = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(message, dict):
+                continue
             request_id = message.get("id")
             if request_id is not None and ("result" in message or "error" in message):
                 future = self._pending.get(request_id)
@@ -175,15 +194,20 @@ class AppServerClient:
             if request_id is not None and "method" in message:
                 await self._handle_server_request(message)
                 continue
-            await self._notifications.put(message)
             method = message.get("method")
-            for future in self._notification_waiters.pop(method, []):
-                if not future.done():
+            delivered = False
+            for future in self._notification_waiters.get(method, []):
+                predicate = self._notification_predicates.get(future)
+                if not future.done() and (predicate is None or predicate(message)):
                     future.set_result(message)
+                    delivered = True
+            if not delivered:
+                await self._notifications.put(message)
         error = AppServerError("app server stdout closed")
         for future in self._pending.values():
             if not future.done():
                 future.set_exception(error)
+        self._fail_notification_waiters(str(error))
 
     async def _read_stderr(self) -> None:
         assert self.process and self.process.stderr
@@ -219,20 +243,29 @@ class AppServerClient:
         predicate: Any = None,
         timeout: float | None = None,
     ) -> dict[str, Any]:
-        while not self._notifications.empty():
+        matched = None
+        for _ in range(self._notifications.qsize()):
             message = self._notifications.get_nowait()
-            if message.get("method") == method and (
+            if matched is None and message.get("method") == method and (
                 predicate is None or predicate(message)
             ):
-                return message
+                matched = message
+            else:
+                self._notifications.put_nowait(message)
+        if matched is not None:
+            return matched
+        if self._stream_error:
+            raise self._stream_error
         future: asyncio.Future[dict[str, Any]] = (
             asyncio.get_running_loop().create_future()
         )
         self._notification_waiters[method].append(future)
+        self._notification_predicates[future] = predicate
         while True:
             try:
                 message = await asyncio.wait_for(future, timeout or 3600)
             finally:
+                self._notification_predicates.pop(future, None)
                 waiters = self._notification_waiters.get(method, [])
                 if future in waiters:
                     waiters.remove(future)

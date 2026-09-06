@@ -29,6 +29,9 @@ SQLite 保存调度状态、Codex Project 让对话继续显示在 Codex 应用�
 
 ## 目录
 
+最新维护审查：[2026 年 9 月问题与修复记录](docs/REVIEW-2026-09-06.md)。
+部署边界与漏洞反馈：[安全说明](SECURITY.md)。
+
 - [为什么需要 Codex Harbor？](#为什么需要-codex-harbor)
 - [系统架构](#系统架构)
 - [TaskSession 与 Turn 的关系](#tasksession-与-turn-的关系)

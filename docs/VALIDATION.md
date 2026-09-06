@@ -1,5 +1,9 @@
 # Validation record
 
+Latest check (2026-09-06): **84 passed, 87% statement coverage**. See the
+[maintenance review](REVIEW-2026-09-06.md) for the new concurrency and recovery
+regressions. The dated results below describe the earlier August validation.
+
 Date: 2026-08-30 (updated 2026-08-31)
 Host: Windows Native
 Codex CLI: 0.149.1

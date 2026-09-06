@@ -113,6 +113,10 @@ class HarborRepository:
         repository: str,
         now: str,
     ) -> str:
+        if spec.execution_backend not in {"local", "linux", "windows", "wsl"}:
+            raise ValueError(f"unsupported execution backend: {spec.execution_backend}")
+        if spec.max_attempts < 1:
+            raise ValueError("max_attempts must be at least 1")
         if (
             conn.execute(
                 "SELECT 1 FROM repositories WHERE path = ?", (repository,)

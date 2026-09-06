@@ -389,7 +389,12 @@ class Worker:
                     {"thread_id": active_thread},
                 )
                 return result
-            except AppServerError:
+            except AppServerError as error:
+                if classify_error(str(error)) in {
+                    ErrorType.RATE_LIMIT_5H, ErrorType.RATE_LIMIT_WEEKLY,
+                    ErrorType.AUTH, ErrorType.NETWORK,
+                }:
+                    raise
                 if isinstance(self.runtime, CodexAppServerRuntime):
                     try:
                         forked = await self.runtime.client.thread_fork(
@@ -419,7 +424,12 @@ class Worker:
                         return await self.runtime.start_turn(
                             fork_id, codex_cwd, prompt, config
                         )
-                    except AppServerError:
+                    except AppServerError as error:
+                        if classify_error(str(error)) in {
+                            ErrorType.RATE_LIMIT_5H, ErrorType.RATE_LIMIT_WEEKLY,
+                            ErrorType.AUTH, ErrorType.NETWORK,
+                        }:
+                            raise
                         pass
         if isinstance(self.runtime, CodexAppServerRuntime):
             started = await self.runtime.client.thread_start(

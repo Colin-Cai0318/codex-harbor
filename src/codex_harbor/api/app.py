@@ -275,7 +275,7 @@ def create_app(
                 "threadId"
             )
             if not raw_thread_id:
-                raise RuntimeError("Codex App Server returned a conversation without an id")
+                raise AppServerError("Codex App Server returned a conversation without an id")
             thread_id = str(raw_thread_id)
             repository.set_thread(
                 task["id"],
@@ -291,6 +291,9 @@ def create_app(
                     )
                 except AppServerError:
                     pass
+        except (AppServerError, TimeoutError, OSError) as error:
+            repository.delete_task(task["id"])
+            raise HTTPException(502, "failed to create Codex conversation") from error
         except Exception:
             repository.delete_task(task["id"])
             raise

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,12 @@ class Scheduler:
                     self.repository.add_event(
                         task_id, "WORKER_CRASHED", {"error": str(future.exception())}
                     )
+                    task = self.repository.get_task(task_id)
+                    if task["status"] in {TaskStatus.CLAIMED, TaskStatus.RUNNING}:
+                        self.repository.transition(
+                            task_id, TaskStatus.BLOCKED, reason="WORKER_CRASHED"
+                        )
+                        self.repository.clear_claim(task_id)
 
     async def _interrupt_cancelled(self) -> None:
         for task_id in self.running:
@@ -95,7 +102,7 @@ class Scheduler:
         max_workers = int(pool["max_workers"])
         slots = max(0, max_workers - len(self.running))
         for _ in range(slots):
-            worker_id = f"worker-{len(self.running) + 1}-{id(self):x}"
+            worker_id = f"worker-{uuid.uuid4().hex}"
             task = self.repository.claim_next(
                 worker_id, grandfathered_only=pool["state"] == PoolStatus.DRAINING
             )
