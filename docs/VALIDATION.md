@@ -1,6 +1,7 @@
 # Validation record
 
-Latest check (2026-09-06): **84 passed, 87% statement coverage**. See the
+Latest check (2026-09-06): **86 passed, 87% statement coverage**, plus **8 live
+Luna/low Turns**. See the [Luna E2E report](LUNA-E2E-2026-09-06.md) and the
 [maintenance review](REVIEW-2026-09-06.md) for the new concurrency and recovery
 regressions. The dated results below describe the earlier August validation.
 

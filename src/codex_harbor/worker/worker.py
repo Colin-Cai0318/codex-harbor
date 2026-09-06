@@ -56,7 +56,11 @@ def classify_error(message: str) -> ErrorType:
         return ErrorType.MCP
     if any(
         token in lowered
-        for token in ("network", "connection reset", "timed out", "timeout")
+        for token in (
+            "network", "connection reset", "timed out", "timeout",
+            "error sending request", "connection refused", "broken pipe",
+            "app server stdout closed", "app server closed",
+        )
     ):
         return ErrorType.NETWORK
     if "git" in lowered or "worktree" in lowered:

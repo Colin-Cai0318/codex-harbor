@@ -32,6 +32,7 @@ worker, Codex process, or sidebar.
 ## Table of contents
 
 Latest maintenance review: [September 2026 findings and fixes](docs/REVIEW-2026-09-06.md).
+Live verification: [Luna test results and reproduction commands](docs/LUNA-E2E-2026-09-06.md).
 Deployment scope and vulnerability reporting: [Security policy](SECURITY.md).
 
 - [Why Codex Harbor?](#why-codex-harbor)

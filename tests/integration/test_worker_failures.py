@@ -231,6 +231,8 @@ async def test_resume_failure_forks_then_falls_back_to_new_thread(
     ("usageLimitExceeded", TaskStatus.WAIT_QUOTA),
     ("authentication required", TaskStatus.BLOCKED),
     ("network timeout", TaskStatus.RETRY_WAIT),
+    ("error sending request for url (https://chatgpt.com/backend-api/wham/usage)", TaskStatus.RETRY_WAIT),
+    ("app server stdout closed", TaskStatus.RETRY_WAIT),
 ])
 async def test_transient_resume_error_never_forks_session(
     repository, git_repo, tmp_path, config_values, error, expected
