@@ -16,6 +16,7 @@ from ..domain import (
     TaskSpec,
     WorkspaceMode,
 )
+from ..quota.weekly_ping import WeeklyPingManager
 from ..recovery.auto_resume import AutoResumeManager
 from ..storage import HarborRepository
 from .dashboard import DASHBOARD
@@ -60,6 +61,10 @@ class AutoResumeCreate(BaseModel):
 
 class RecoverySettingsPatch(BaseModel):
     allow_luna_reserve: bool
+
+
+class WeeklyPingSettingsPatch(BaseModel):
+    enabled: bool
 
 
 class TaskGroupItem(BaseModel):
@@ -174,6 +179,14 @@ def create_app(
     @app.get("/api/recovery-settings")
     async def recovery_settings():
         return AutoResumeManager(repository, app_server_client).settings()
+
+    @app.get("/api/weekly-ping")
+    async def weekly_ping_settings():
+        return WeeklyPingManager(repository).settings()
+
+    @app.patch("/api/weekly-ping")
+    async def update_weekly_ping(body: WeeklyPingSettingsPatch):
+        return WeeklyPingManager(repository).set_enabled(body.enabled)
 
     @app.patch("/api/recovery-settings")
     async def update_recovery_settings(body: RecoverySettingsPatch):

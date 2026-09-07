@@ -283,7 +283,7 @@ DASHBOARD = r"""<!doctype html>
       .hero { flex-direction: column; gap: 12px; }
       .form-grid, .detail-grid { grid-template-columns: 1fr; }
       .field.wide { grid-column: auto; }
-      .toolbar-right .switch-label span { display: none; }
+      .toolbar-right .switch-label { flex-basis: 100%; }
     }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
   </style>
@@ -336,6 +336,8 @@ DASHBOARD = r"""<!doctype html>
         </div>
         <div class="toolbar-right">
           <label class="switch-label"><input id="weeklyFreeze" type="checkbox"><span data-i18n="pool.freezeOnReset">Freeze on weekly reset</span></label>
+          <label class="switch-label"><input id="weeklyPing" type="checkbox"><span data-i18n="pool.weeklyPing">Send a Luna message after weekly reset</span></label>
+          <span id="weeklyPingStatus" class="muted" aria-live="polite"></span>
           <button class="btn pool-action" data-action="pause" type="button" data-i18n="actions.pause">Pause</button>
           <button class="btn pool-action" data-action="freeze" type="button" data-i18n="actions.freeze">Freeze</button>
           <button class="btn pool-action" data-action="resume" type="button" data-i18n="actions.resume">Resume</button>
@@ -390,6 +392,7 @@ DASHBOARD = r"""<!doctype html>
         'quota.checking':'Checking', 'quota.unknown':'Unknown', 'quota.noData':'No data', 'quota.unavailable':'Unavailable', 'quota.used':'{value}% used', 'quota.remaining':'{value}% remaining', 'quota.resetUnavailable':'Reset time unavailable', 'quota.resets':'Resets {value}',
         'board.search':'Search tasks', 'board.newTask':'＋ New task', 'board.empty':'No tasks in this pool',
         'lane.backlog':'Backlog', 'lane.ready':'Ready', 'lane.active':'Active', 'lane.waiting':'Waiting', 'lane.attention':'Needs attention', 'lane.completed':'Completed',
+        'pool.weeklyPing':'Send a Luna message after weekly reset', 'ping.waiting':'Waiting for weekly reset', 'ping.STARTED':'Sending (after interruption, delivery may be unknown)', 'ping.SENT':'Message sent; waiting for next reset time', 'ping.FAILED':'Send failed; no automatic resend', 'ping.confirmed':'Next reset: {time}',
         'pool.freezeOnReset':'Freeze on weekly reset', 'pool.draining':'Weekly reset detected. {count} grandfathered {tasks} may continue; new tasks will not start.', 'pool.frozen':'Harbor is frozen after the weekly drain. {count} {tasks} remain queued until manual resume.', 'pool.paused':'Scheduling is paused. Running tasks may finish, but no new task will start.',
         'actions.pause':'Pause', 'actions.freeze':'Freeze', 'actions.resume':'Resume', 'actions.close':'Close', 'actions.cancel':'Cancel', 'actions.createTask':'Send task', 'actions.addDirectory':'Add directory', 'actions.remove':'Remove', 'actions.saveNextTurn':'Save for next turn', 'actions.copyWorktree':'Copy worktree', 'actions.copyThread':'Copy thread ID', 'actions.retry':'Retry', 'actions.cancelTask':'Cancel task',
         'create.title':'Send work to Codex', 'create.projectHint':'Choose the same Project and conversation you use in Codex.', 'create.advanced':'Advanced scheduling and optional verification',
@@ -412,6 +415,7 @@ DASHBOARD = r"""<!doctype html>
         'quota.checking':'检查中', 'quota.unknown':'未知', 'quota.noData':'暂无数据', 'quota.unavailable':'不可用', 'quota.used':'已使用 {value}%', 'quota.remaining':'剩余 {value}%', 'quota.resetUnavailable':'暂无重置时间', 'quota.resets':'重置时间 {value}',
         'board.search':'搜索任务', 'board.newTask':'＋ 新建任务', 'board.empty':'该状态池暂无任务',
         'lane.backlog':'待处理', 'lane.ready':'就绪', 'lane.active':'执行中', 'lane.waiting':'等待中', 'lane.attention':'需要处理', 'lane.completed':'已完成',
+        'pool.weeklyPing':'周额度重置后发送 Luna 消息', 'ping.waiting':'等待周额度重置', 'ping.STARTED':'发送中（中断后可能无法确认结果）', 'ping.SENT':'已发送，等待下一次重置时间', 'ping.FAILED':'发送失败，不自动重发', 'ping.confirmed':'下次重置：{time}',
         'pool.freezeOnReset':'周额度重置后冻结', 'pool.draining':'检测到周额度重置。{count} 个存量任务可继续执行；新任务暂不启动。', 'pool.frozen':'周额度排空后 Harbor 已冻结。仍有 {count} 个任务排队，需手动恢复。', 'pool.paused':'调度已暂停。运行中的任务可以完成，但不会启动新任务。',
         'actions.pause':'暂停', 'actions.freeze':'冻结', 'actions.resume':'恢复', 'actions.close':'关闭', 'actions.cancel':'取消', 'actions.createTask':'发送任务', 'actions.addDirectory':'添加目录', 'actions.remove':'移除', 'actions.saveNextTurn':'保存并在下一轮生效', 'actions.copyWorktree':'复制工作树路径', 'actions.copyThread':'复制线程 ID', 'actions.retry':'重试', 'actions.cancelTask':'取消任务',
         'create.title':'发送任务到 Codex', 'create.projectHint':'选择与你在 Codex 中使用的同一个项目和对话。', 'create.advanced':'高级调度与可选验证',
@@ -548,8 +552,12 @@ DASHBOARD = r"""<!doctype html>
 
     async function refresh() {
       try {
-        const [pool, tasks, quotas, workers] = await Promise.all([request('/api/pool'), request('/api/tasks'), request('/api/quota'), request('/api/workers')]);
+        const [pool, tasks, quotas, workers, ping] = await Promise.all([request('/api/pool'), request('/api/tasks'), request('/api/quota'), request('/api/workers'), request('/api/weekly-ping')]);
         renderOverview(pool, tasks, quotas, workers);
+        byId('weeklyPing').checked = ping.enabled;
+        const lastPing = ping.last_ping;
+        byId('weeklyPingStatus').textContent = !ping.enabled ? '' : lastPing?.next_reset_at ? t('ping.confirmed', {time:new Date(lastPing.next_reset_at).toLocaleString(state.language)}) : t(lastPing ? `ping.${lastPing.status}` : 'ping.waiting');
+        byId('weeklyPingStatus').title = lastPing?.error || '';
         byId('errorNotice').classList.remove('show');
         const time = new Date().toLocaleTimeString(state.language, {hour:'2-digit', minute:'2-digit', second:'2-digit'});
         byId('lastUpdated').textContent = t('runtime.updated', {time});
@@ -775,6 +783,7 @@ DASHBOARD = r"""<!doctype html>
     document.querySelectorAll('.dialog-close').forEach(button => button.addEventListener('click', () => button.closest('dialog').close()));
     document.querySelectorAll('.pool-action').forEach(button => button.addEventListener('click', () => poolAction(button.dataset.action)));
     byId('weeklyFreeze').addEventListener('change', async event => { try { await request('/api/pool', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({freeze_on_weekly_reset:event.target.checked})}); await refresh(); } catch (error) { event.target.checked = !event.target.checked; showError(error); } });
+    byId('weeklyPing').addEventListener('change', async event => { event.target.disabled = true; try { await request('/api/weekly-ping', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled:event.target.checked})}); await refresh(); } catch (error) { event.target.checked = !event.target.checked; showError(error); } finally { event.target.disabled = false; } });
     byId('maxWorkersInput').addEventListener('change', updateMaxWorkers);
     byId('board').addEventListener('click', event => { const card = event.target.closest('[data-task-id]'); if (card) showTask(card.dataset.taskId); });
     byId('createForm').addEventListener('submit', createTask);

@@ -6,6 +6,22 @@ from contextlib import contextmanager
 from pathlib import Path
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS weekly_ping_settings (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    enabled INTEGER NOT NULL DEFAULT 0,
+    observed_reset TEXT
+);
+INSERT OR IGNORE INTO weekly_ping_settings(id) VALUES(1);
+CREATE TABLE IF NOT EXISTS weekly_pings (
+    reset_at TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    thread_id TEXT,
+    turn_id TEXT,
+    next_reset_at TEXT,
+    error TEXT
+);
 CREATE TABLE IF NOT EXISTS recovery_settings (
     id INTEGER PRIMARY KEY CHECK(id=1),
     allow_luna_reserve INTEGER NOT NULL DEFAULT 0
