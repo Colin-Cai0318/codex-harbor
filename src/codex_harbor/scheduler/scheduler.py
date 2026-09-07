@@ -12,6 +12,7 @@ from ..domain import PoolStatus, TaskStatus
 from ..execution import select_backend
 from ..git import WorktreeManager
 from ..quota import QuotaManager
+from ..quota.weekly_ping import WeeklyPingManager
 from ..recovery import RecoveryManager
 from ..recovery.auto_resume import AutoResumeManager
 from ..runtime import AgentRuntime, CodexAppServerRuntime
@@ -42,6 +43,11 @@ class Scheduler:
         self.stopping = False
         self.auto_resume = (
             AutoResumeManager(repository, runtime.client)
+            if isinstance(runtime, CodexAppServerRuntime)
+            else None
+        )
+        self.weekly_ping = (
+            WeeklyPingManager(repository, runtime.client)
             if isinstance(runtime, CodexAppServerRuntime)
             else None
         )
@@ -99,6 +105,9 @@ class Scheduler:
                 None, "QUOTA_REFRESH_FAILED", {"error": str(error)}
             )
         else:
+            if self.weekly_ping:
+                self.weekly_ping.observe_confirmation(windows)
+                await self.weekly_ping.tick(windows)
             if self.auto_resume:
                 await self.auto_resume.tick(windows)
             # Never release waiters using stale telemetry after a failed refresh.

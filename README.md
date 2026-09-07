@@ -505,6 +505,22 @@ validated: a real 5-hour/weekly quota exhaustion cycle, destructive process-kill
 and host-reboot testing, Linux/WSL host soak testing, and Windows service
 packaging. See the [validation record](docs/VALIDATION.md) for exact evidence.
 
+## Weekly Luna message
+
+The dashboard includes an opt-in **Send a Luna message after weekly reset** switch.
+Harbor remembers the observed weekly reset boundary and, once it passes and fresh
+quota telemetry permits usage, sends one `OK` request with `gpt-5.6-luna / low`
+in a separate read-only conversation. This works independently of pool pause/freeze
+and requires the daemon to be running and online. It does not use Luna Reserve.
+Turning it off prevents future sends; an already submitted request cannot be recalled.
+
+SQLite claims prevent duplicate attempts after restart. Uncertain delivery, timeout,
+or failure is displayed and is not automatically retried. A successful message does
+not prove a new weekly timer has started; the dashboard shows the next reset time
+when subsequently reported by the account. Live weekly rollover remains unverified.
+Use `GET /api/weekly-ping` for status and `PATCH /api/weekly-ping` with
+`{"enabled": true}` (or `false`) to change the setting. The default is off.
+
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE).
