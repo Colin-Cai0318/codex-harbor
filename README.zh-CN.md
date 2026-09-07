@@ -17,6 +17,34 @@
 
 </div>
 
+## 当前对话自动恢复
+
+将 `integrations/plugins/codex-harbor/skills/harbor-auto-resume` 复制到
+`$CODEX_HOME/skills/harbor-auto-resume`（未设置时为 `~/.codex/skills/`），
+在 Codex 中说“自动恢复当前任务”。技能立即向本机 Harbor 登记保护，默认在
+5h 用量达到 95% 时创建绑定原 Thread ID 的 task。只有原轮次确实因额度失败，
+且额度恢复后才执行；原轮次正常完成则撤销保护。Harbor 服务需要保持运行。
+
+登记和 task 创建不依赖模型。开启 `PATCH /api/recovery-settings` 的
+`allow_luna_reserve: true` 后，若 5h 额度已耗尽且尚未创建 task，Harbor 可在原对话
+使用新版 **Luna Reserve**（实际模型标识 `gpt-reserve`、推理等级 `xhigh`）补写续接
+摘要并创建 task，每次保护最多一轮。普通 `gpt-5.6-luna` 与该储备入口不同。
+已有 task 时不消耗储备；储备不可用时仍直接创建 task。后续工作保留原主模型配置。
+
+`GET/POST /api/recovery-watches` 用于查询/登记保护，
+`POST /api/recovery-watches/{id}/cancel` 用于取消。
+重复登记同一对话不会创建多个有效保护。
+
+普通手动续接使用 `POST /api/tasks`，传入 `conversation_mode: "existing"`、
+`thread_id` 和 `message`，可不提供 Project ID。`origin_thread_id` 单独使用仅记录
+来源，不代表续接。明确选择的原对话恢复失败时不会 fork 或另开对话。
+
+每个 worker 使用独立 App Server，执行结束或等待额度时关闭，从而释放对话写入权。
+执行中的对话仍可能在桌面显示被占用；桌面仍持有写入权时 Harbor 每分钟重试原对话，
+不消耗失败次数。新对话在 worker 首次执行时才创建，排队期间 Thread ID 可为空。
+
+参见 [本次审阅与验证](docs/REVIEW-2026-09-07.md)。
+
 ---
 
 Codex Harbor 是构建在 Codex App Server 之上的本地优先控制平面。它使用
@@ -97,7 +125,7 @@ Harbor Dashboard 负责补充生命周期、并发和额度控制，并不是另
 | Task | 业务目标、仓库、提示词、验收标准、依赖和调度状态 | 直到被显式删除 |
 | Codex Project | 由 Codex 应用管理的工作区根目录与持久化 Thread 集合 | Codex 与 Harbor 共同使用 |
 | Root Thread | 持久化 Codex Session 和对话历史 | 默认一个任务独享；也可由任务链共享 |
-| Recovery Thread | 仅在原 Thread 无法恢复时 Fork 或新建 | 仍关联同一个 Task |
+| Recovery Thread | 旧版未指定对话模式的 task 可在恢复失败时 Fork；明确选择原对话时禁止 | 仍关联同一个 Task |
 | Turn | Thread 内的一次提示词执行 | 与 Thread ID、执行轮次一起记录 |
 | 计入预算的失败 | 会消耗失败重试上限的运行或验收失败 | 与 Turn 数量独立计算 |
 
@@ -217,8 +245,8 @@ uv run harbor history T001
 Dashboard 现在直接采用 Codex 应用的使用方式：
 
 1. 选择 **Codex 项目**，Harbor 会加载该项目内的持久化对话。
-2. 选择 **已有对话** 可沿用其完整上下文和 cwd；选择 **新建对话** 会立即创建
-   一条持久化 Codex 对话。
+2. 选择 **已有对话** 可沿用其完整上下文和 cwd；选择 **新建对话** 会在 worker
+   首次执行时创建并持久化 Codex 对话。
 3. 新建对话时添加一个或多个绝对路径，并指定主目录。主目录必须位于 Git 工作区；
    其他目录会作为 Codex runtime workspace roots 一并传入。
 4. 输入你本来会在 Codex 中发送的同一条消息，点击“发送任务”。

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Harbor 自动恢复当前任务"
+  short_description: "在 5h 额度恢复后续接当前原对话，保留工作区、模型和上下文"
+  default_prompt: "使用 $harbor-auto-resume 为当前任务登记额度恢复后的原对话自动续接。"
+policy:
+  allow_implicit_invocation: true

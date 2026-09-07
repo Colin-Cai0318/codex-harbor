@@ -24,6 +24,7 @@ async def serve(config_path: str | None = None) -> None:
             client,
             approval_policy=codex.get("approval_policy", "never"),
             sandbox=codex.get("sandbox", "workspace-write"),
+            isolated_workers=True,
         )
         scheduler = Scheduler(
             container.repository,

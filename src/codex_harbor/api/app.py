@@ -14,9 +14,9 @@ from ..domain import (
     PoolStatus,
     SessionMode,
     TaskSpec,
-    ThreadRole,
     WorkspaceMode,
 )
+from ..recovery.auto_resume import AutoResumeManager
 from ..storage import HarborRepository
 from .dashboard import DASHBOARD
 
@@ -46,6 +46,20 @@ class TaskCreate(BaseModel):
     thread_id: str | None = None
     primary_workspace: str | None = None
     workspace_roots: list[str] = Field(default_factory=list)
+
+
+class AutoResumeCreate(BaseModel):
+    thread_id: str = Field(min_length=1)
+    prompt: str = Field(min_length=1)
+    title: str = "自动恢复当前任务"
+    model: str = Field(min_length=1)
+    reasoning_effort: str = Field(min_length=1)
+    threshold: float = Field(default=95, ge=1, le=100)
+    acceptance_commands: list[str] = Field(default_factory=list)
+
+
+class RecoverySettingsPatch(BaseModel):
+    allow_luna_reserve: bool
 
 
 class TaskGroupItem(BaseModel):
@@ -99,7 +113,6 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="Codex Harbor", version="0.1.0")
     configured_profiles = profiles or {}
-    configured_codex = codex_settings or {}
 
     def guard(call: Any) -> Any:
         try:
@@ -142,7 +155,9 @@ def create_app(
         try:
             return await app_server_client.project_read(project_id)
         except AppServerError as error:
-            raise HTTPException(404, f"Codex project not found: {project_id}") from error
+            raise HTTPException(
+                404, f"Codex project not found: {project_id}"
+            ) from error
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def dashboard() -> str:
@@ -151,6 +166,76 @@ def create_app(
     @app.get("/api/tasks")
     async def list_tasks() -> list[dict[str, Any]]:
         return repository.list_tasks()
+
+    @app.get("/api/recovery-watches")
+    async def recovery_watches():
+        return AutoResumeManager(repository, app_server_client).list()
+
+    @app.get("/api/recovery-settings")
+    async def recovery_settings():
+        return AutoResumeManager(repository, app_server_client).settings()
+
+    @app.patch("/api/recovery-settings")
+    async def update_recovery_settings(body: RecoverySettingsPatch):
+        return AutoResumeManager(repository, app_server_client).set_reserve_enabled(
+            body.allow_luna_reserve
+        )
+
+    @app.post("/api/recovery-watches", status_code=201)
+    async def arm_recovery(body: AutoResumeCreate):
+        if app_server_client is None:
+            raise HTTPException(503, "Codex App Server is unavailable")
+        if model_registry is not None:
+            guard(
+                lambda: model_registry.resolve(
+                    task_model=body.model,
+                    task_reasoning=body.reasoning_effort,
+                    global_model=body.model,
+                )
+            )
+        try:
+            if hasattr(app_server_client, "thread_inspect_latest"):
+                result = await app_server_client.thread_inspect_latest(body.thread_id)
+            else:
+                result = await app_server_client.thread_read(
+                    body.thread_id, include_turns=True
+                )
+        except AppServerError as error:
+            raise HTTPException(
+                502, "could not verify the original conversation"
+            ) from error
+        thread = result.get("thread", result)
+        if thread.get("id") != body.thread_id or not thread.get("cwd"):
+            raise HTTPException(
+                409, "original conversation identity or workspace is missing"
+            )
+        root = await git_root(thread["cwd"])
+        repository.add_repository(root)
+        spec = TaskSpec(
+            title=body.title,
+            repository=root,
+            prompt=body.prompt,
+            model=body.model,
+            reasoning_effort=body.reasoning_effort,
+            origin_thread_id=body.thread_id,
+            conversation_mode=ConversationMode.EXISTING,
+            conversation_cwd=thread["cwd"],
+            codex_project_id=thread.get("projectId"),
+            direct_prompt=True,
+            preserve_thread_name=True,
+            acceptance_commands=body.acceptance_commands,
+        )
+        return guard(
+            lambda: AutoResumeManager(repository, app_server_client).arm(
+                spec, thread, body.threshold
+            )
+        )
+
+    @app.post("/api/recovery-watches/{watch_id}/cancel")
+    async def cancel_recovery(watch_id: str):
+        return guard(
+            lambda: AutoResumeManager(repository, app_server_client).cancel(watch_id)
+        )
 
     @app.get("/api/repositories")
     async def list_repositories() -> list[dict[str, Any]]:
@@ -169,7 +254,11 @@ def create_app(
         message = body.message if body.message is not None else body.prompt or ""
         if not message.strip():
             raise HTTPException(409, "task message is required")
-        project_flow = body.conversation_mode is not None or body.message is not None
+        project_flow = (
+            body.conversation_mode is not None
+            or body.message is not None
+            or body.thread_id is not None
+        )
         selected_thread: dict[str, Any] | None = None
         runtime_roots: list[str] = []
         primary: str | None = None
@@ -177,13 +266,13 @@ def create_app(
         repository_path = body.repository
         mode = body.conversation_mode
         if project_flow:
-            if not project_id:
-                raise HTTPException(409, "select a Codex project")
-            project = await project_or_404(project_id)
             mode = mode or (
                 ConversationMode.EXISTING if body.thread_id else ConversationMode.NEW
             )
+            project = await project_or_404(project_id) if project_id else None
             if mode == ConversationMode.EXISTING:
+                if app_server_client is None:
+                    raise HTTPException(503, "Codex App Server is unavailable")
                 if not body.thread_id:
                     raise HTTPException(409, "select an existing Codex conversation")
                 try:
@@ -193,15 +282,24 @@ def create_app(
                 except AppServerError as error:
                     raise HTTPException(404, "Codex conversation not found") from error
                 selected_thread = result.get("thread", result)
-                if selected_thread.get("projectId") != project_id:
+                if selected_thread.get("id") != body.thread_id:
+                    raise HTTPException(
+                        409, "Codex conversation identity did not match"
+                    )
+                if project_id and selected_thread.get("projectId") != project_id:
                     raise HTTPException(
                         409, "the selected conversation is not in this Codex project"
                     )
+                project_id = project_id or selected_thread.get("projectId")
                 primary = selected_thread.get("cwd")
                 if not primary:
-                    raise HTTPException(409, "the selected conversation has no workspace")
+                    raise HTTPException(
+                        409, "the selected conversation has no workspace"
+                    )
                 runtime_roots = [str(Path(primary).expanduser().resolve())]
             else:
+                if project is None:
+                    raise HTTPException(409, "select a Codex project")
                 project_roots = [item["path"] for item in project.get("roots", [])]
                 requested = body.workspace_roots or project_roots
                 runtime_roots = list(
@@ -211,7 +309,8 @@ def create_app(
                 )
                 if not runtime_roots:
                     raise HTTPException(
-                        409, "add at least one workspace directory for the new conversation"
+                        409,
+                        "add at least one workspace directory for the new conversation",
                     )
                 for root in runtime_roots:
                     if not Path(root).is_dir():
@@ -246,7 +345,9 @@ def create_app(
                     reasoning_effort=body.reasoning_effort,
                     profile=body.profile,
                     codex_project_id=project_id,
-                    origin_thread_id=body.origin_thread_id,
+                    origin_thread_id=body.thread_id
+                    if mode == ConversationMode.EXISTING
+                    else body.origin_thread_id,
                     session_parent_task_id=body.session_parent_task_id,
                     reuse_parent_worktree=body.reuse_parent_worktree,
                     workspace_mode=body.workspace_mode,
@@ -258,46 +359,9 @@ def create_app(
                 )
             )
         )
-        if not project_flow:
-            return task
-        try:
-            if selected_thread is None:
-                started = await app_server_client.thread_start(
-                    cwd=primary or repository_path,
-                    model=body.model,
-                    approval_policy=configured_codex.get("approval_policy", "never"),
-                    sandbox=configured_codex.get("sandbox", "workspace-write"),
-                    project_id=project_id,
-                    runtime_workspace_roots=runtime_roots,
-                )
-                selected_thread = started.get("thread", started)
-            raw_thread_id = selected_thread.get("id") or selected_thread.get(
-                "threadId"
-            )
-            if not raw_thread_id:
-                raise AppServerError("Codex App Server returned a conversation without an id")
-            thread_id = str(raw_thread_id)
-            repository.set_thread(
-                task["id"],
-                thread_id,
-                ThreadRole.ROOT,
-                model=body.model,
-                project_id=project_id,
-            )
-            if mode == ConversationMode.NEW:
-                try:
-                    await app_server_client.thread_set_name(
-                        thread_id, f'[{task["id"]}] {task["title"]}'
-                    )
-                except AppServerError:
-                    pass
-        except (AppServerError, TimeoutError, OSError) as error:
-            repository.delete_task(task["id"])
-            raise HTTPException(502, "failed to create Codex conversation") from error
-        except Exception:
-            repository.delete_task(task["id"])
-            raise
-        return repository.get_task(task["id"])
+        # Empty threads are not durable until the first turn. Create new threads
+        # in the worker that will run them, never on the daemon's control client.
+        return task
 
     @app.get("/api/task-groups")
     async def list_task_groups() -> list[dict[str, Any]]:

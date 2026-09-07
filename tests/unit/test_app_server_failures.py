@@ -18,6 +18,30 @@ class Reader:
 
 
 @pytest.mark.asyncio
+async def test_large_json_rpc_response_survives_real_pipe_and_close(monkeypatch):
+    real_spawn = asyncio.create_subprocess_exec
+    server = (
+        "import sys,json\n"
+        "for line in sys.stdin:\n"
+        " m=json.loads(line)\n"
+        " if 'id' in m:\n"
+        "  print(json.dumps({'id':m['id'],'result':{'text':'x'*200000}}),flush=True)\n"
+    )
+
+    async def spawn(*args, **kwargs):
+        return await real_spawn(sys.executable, "-u", "-c", server, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    client = AppServerClient(sys.executable, request_timeout=5)
+    async with client:
+        result = await client.request("thread/read", {"threadId": "large"})
+        assert len(result["text"]) == 200000
+    assert client._reader_task.done()
+    assert client._stderr_task.done()
+    assert client.process is None
+
+
+@pytest.mark.asyncio
 async def test_request_transport_failure_and_timeout_do_not_leak_pending_entries():
     client = AppServerClient(sys.executable, request_timeout=0.001)
 

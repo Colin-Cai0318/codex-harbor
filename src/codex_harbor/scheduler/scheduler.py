@@ -13,7 +13,8 @@ from ..execution import select_backend
 from ..git import WorktreeManager
 from ..quota import QuotaManager
 from ..recovery import RecoveryManager
-from ..runtime import AgentRuntime
+from ..recovery.auto_resume import AutoResumeManager
+from ..runtime import AgentRuntime, CodexAppServerRuntime
 from ..storage import HarborRepository
 from ..worker import Worker
 
@@ -39,6 +40,11 @@ class Scheduler:
         self.running: dict[str, asyncio.Task[None]] = {}
         self.interrupting: set[str] = set()
         self.stopping = False
+        self.auto_resume = (
+            AutoResumeManager(repository, runtime.client)
+            if isinstance(runtime, CodexAppServerRuntime)
+            else None
+        )
 
     def _reap(self) -> None:
         for task_id, future in list(self.running.items()):
@@ -87,12 +93,16 @@ class Scheduler:
         await self._interrupt_cancelled()
         self.recovery_manager.recover_stale_workers()
         try:
-            await self.quota_manager.refresh()
+            windows = await self.quota_manager.refresh()
         except Exception as error:  # noqa: BLE001 - quota providers must not stop scheduling
             self.repository.add_event(
                 None, "QUOTA_REFRESH_FAILED", {"error": str(error)}
             )
-        self.quota_manager.release_quota_waiters()
+        else:
+            if self.auto_resume:
+                await self.auto_resume.tick(windows)
+            # Never release waiters using stale telemetry after a failed refresh.
+            self.quota_manager.release_quota_waiters()
         self._release_retries()
         self.repository.refresh_dependencies()
         self.repository.freeze_if_drained()

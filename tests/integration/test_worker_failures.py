@@ -5,12 +5,16 @@ import pytest
 from codex_harbor.acceptance import AcceptanceRunner
 from codex_harbor.acceptance.runner import AcceptanceResult, CommandResult
 from codex_harbor.codex import AppServerError, ModelRegistry
-from codex_harbor.domain import EffectiveAgentConfig, RuntimeTurnResult, TaskSpec, TaskStatus, ThreadRole
+from codex_harbor.domain import (
+    RuntimeTurnResult,
+    TaskSpec,
+    TaskStatus,
+    ThreadRole,
+)
 from codex_harbor.execution import select_backend
 from codex_harbor.git import WorktreeManager
 from codex_harbor.runtime import AgentRuntime, CodexAppServerRuntime
 from codex_harbor.worker import Worker
-
 
 MODELS = [
     {
@@ -18,9 +22,7 @@ MODELS = [
         "displayName": "Model A",
         "isDefault": True,
         "defaultReasoningEffort": "medium",
-        "supportedReasoningEfforts": [
-            {"reasoningEffort": "medium", "description": ""}
-        ],
+        "supportedReasoningEfforts": [{"reasoningEffort": "medium", "description": ""}],
     }
 ]
 
@@ -53,7 +55,9 @@ class ErrorRuntime(AgentRuntime):
         return {"ok": True}
 
 
-def worker_for(repository, runtime, git_repo, tmp_path, config_values, worker_id, acceptance=None):
+def worker_for(
+    repository, runtime, git_repo, tmp_path, config_values, worker_id, acceptance=None
+):
     return Worker(
         repository,
         runtime,
@@ -88,7 +92,12 @@ async def test_runtime_failures_take_the_correct_terminal_or_retry_path(
         )
     )
     worker = worker_for(
-        repository, ErrorRuntime(message), git_repo, tmp_path, config_values, "fault-worker"
+        repository,
+        ErrorRuntime(message),
+        git_repo,
+        tmp_path,
+        config_values,
+        "fault-worker",
     )
     await worker.run(repository.claim_next("fault-worker"))
     finished = repository.get_task(task["id"])
@@ -107,7 +116,9 @@ async def test_cancellation_during_completed_turn_remains_cancelled(
         TaskSpec(task_id="T001", title="cancel", repository=str(git_repo), prompt="x")
     )
     runtime = ErrorRuntime("", repository, task["id"])
-    worker = worker_for(repository, runtime, git_repo, tmp_path, config_values, "cancel-worker")
+    worker = worker_for(
+        repository, runtime, git_repo, tmp_path, config_values, "cancel-worker"
+    )
     await worker.run(repository.claim_next("cancel-worker"))
     assert repository.get_task(task["id"])["status"] == TaskStatus.CANCELLED
 
@@ -170,6 +181,9 @@ class ForkingClient:
         self.fork_fails = fork_fails
         self.started = 0
 
+    async def thread_read(self, thread_id, **kwargs):
+        return {"thread": {"id": thread_id}}
+
     async def find_project_for_path(self, path):
         return {"id": "project-1"}
 
@@ -218,7 +232,9 @@ async def test_resume_failure_forks_then_falls_back_to_new_thread(
     repository.set_thread(task["id"], "thread-old", ThreadRole.ROOT)
     client = ForkingClient(fork_fails=fork_fails)
     runtime = CodexAppServerRuntime(client)  # type: ignore[arg-type]
-    worker = worker_for(repository, runtime, git_repo, tmp_path, config_values, "recovery-worker")
+    worker = worker_for(
+        repository, runtime, git_repo, tmp_path, config_values, "recovery-worker"
+    )
     await worker.run(repository.claim_next("recovery-worker"))
     finished = repository.get_task(task["id"])
     assert finished["status"] == TaskStatus.SUCCEEDED
@@ -227,13 +243,19 @@ async def test_resume_failure_forks_then_falls_back_to_new_thread(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("error,expected", [
-    ("usageLimitExceeded", TaskStatus.WAIT_QUOTA),
-    ("authentication required", TaskStatus.BLOCKED),
-    ("network timeout", TaskStatus.RETRY_WAIT),
-    ("error sending request for url (https://chatgpt.com/backend-api/wham/usage)", TaskStatus.RETRY_WAIT),
-    ("app server stdout closed", TaskStatus.RETRY_WAIT),
-])
+@pytest.mark.parametrize(
+    "error,expected",
+    [
+        ("usageLimitExceeded", TaskStatus.WAIT_QUOTA),
+        ("authentication required", TaskStatus.BLOCKED),
+        ("network timeout", TaskStatus.RETRY_WAIT),
+        (
+            "error sending request for url (https://chatgpt.com/backend-api/wham/usage)",
+            TaskStatus.RETRY_WAIT,
+        ),
+        ("app server stdout closed", TaskStatus.RETRY_WAIT),
+    ],
+)
 async def test_transient_resume_error_never_forks_session(
     repository, git_repo, tmp_path, config_values, error, expected
 ):
@@ -244,16 +266,107 @@ async def test_transient_resume_error_never_forks_session(
         async def thread_fork(self, *args, **kwargs):
             pytest.fail("transient errors must retain the existing session")
 
-    task = repository.create_task(TaskSpec(
-        title="preserve session", repository=str(git_repo), prompt="continue"
-    ))
+    task = repository.create_task(
+        TaskSpec(title="preserve session", repository=str(git_repo), prompt="continue")
+    )
     repository.set_thread(task["id"], "thread-old", ThreadRole.ROOT)
     client = Client()
-    worker = worker_for(repository, CodexAppServerRuntime(client), git_repo,
-                        tmp_path, config_values, "preserve-worker")
+    worker = worker_for(
+        repository,
+        CodexAppServerRuntime(client),
+        git_repo,
+        tmp_path,
+        config_values,
+        "preserve-worker",
+    )
     await worker.run(repository.claim_next("preserve-worker"))
     finished = repository.get_task(task["id"])
     assert finished["status"] == expected
     assert finished["root_thread_id"] == "thread-old"
     assert len(finished["threads"]) == 1
     assert client.started == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error,busy", [("resume failed", False), ("already has an active writer", True)]
+)
+async def test_explicit_original_thread_never_forks_and_busy_does_not_exhaust_retries(
+    repository, git_repo, tmp_path, config_values, error, busy
+):
+    class Client(ForkingClient):
+        async def thread_resume(self, *args, **kwargs):
+            raise AppServerError(error)
+
+        async def thread_fork(self, *args, **kwargs):
+            pytest.fail("explicit original thread cannot fork")
+
+    task = repository.create_task(
+        TaskSpec(
+            title="original",
+            repository=str(git_repo),
+            prompt="continue",
+            conversation_mode="existing",
+            origin_thread_id="thread-old",
+            max_attempts=1,
+        )
+    )
+    client = Client()
+    worker = worker_for(
+        repository,
+        CodexAppServerRuntime(client),
+        git_repo,
+        tmp_path,
+        config_values,
+        "original-worker",
+    )
+    await worker.run(repository.claim_next("original-worker"))
+    result = repository.get_task(task["id"])
+    assert result["root_thread_id"] == "thread-old"
+    assert len(result["threads"]) == 1
+    assert client.started == 0
+    assert result["status"] == ("RETRY_WAIT" if busy else "FAILED")
+    assert result["failure_count"] == (0 if busy else 1)
+
+
+@pytest.mark.asyncio
+async def test_worker_closes_its_own_client_on_quota_wait(
+    repository, git_repo, tmp_path, config_values, monkeypatch
+):
+    closed = []
+
+    class Session(ForkingClient):
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            closed.append(self)
+
+        async def thread_resume(self, *args, **kwargs):
+            raise AppServerError("usageLimitExceeded")
+
+    session = Session()
+    monkeypatch.setattr(
+        "codex_harbor.worker.worker.AppServerClient", lambda *a, **k: session
+    )
+    control = ForkingClient()
+    control.executable = "codex"
+    control.request_timeout = 30
+    runtime = CodexAppServerRuntime(control, isolated_workers=True)
+    task = repository.create_task(
+        TaskSpec(
+            title="wait",
+            repository=str(git_repo),
+            prompt="continue",
+            conversation_mode="existing",
+            origin_thread_id="thread-old",
+        )
+    )
+    worker = worker_for(
+        repository, runtime, git_repo, tmp_path, config_values, "worker"
+    )
+    await worker.run(repository.claim_next("worker"))
+    assert repository.get_task(task["id"])["status"] == "WAIT_QUOTA"
+    assert closed == [session]
+    assert worker.runtime is runtime
+    assert control.started == 0

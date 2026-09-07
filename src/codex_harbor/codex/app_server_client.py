@@ -75,6 +75,9 @@ class AppServerClient:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # Thread history and tool results routinely exceed asyncio's 64 KiB
+            # readline default. JSON-RPC uses one complete message per line.
+            limit=32 * 1024 * 1024,
         )
         self._reader_task = asyncio.create_task(self._read_stdout())
         self._stderr_task = asyncio.create_task(self._read_stderr())
@@ -113,6 +116,10 @@ class AppServerClient:
         for task in (self._reader_task, self._stderr_task):
             if task and not task.done():
                 task.cancel()
+        await asyncio.gather(
+            *(task for task in (self._reader_task, self._stderr_task) if task),
+            return_exceptions=True,
+        )
         for future in self._pending.values():
             if not future.done():
                 future.set_exception(AppServerError("app server closed"))
@@ -175,8 +182,9 @@ class AppServerClient:
 
     async def _read_stdout(self) -> None:
         assert self.process and self.process.stdout
+        stream = self.process.stdout
         while True:
-            line = await self.process.stdout.readline()
+            line = await stream.readline()
             if not line:
                 break
             try:
@@ -211,8 +219,9 @@ class AppServerClient:
 
     async def _read_stderr(self) -> None:
         assert self.process and self.process.stderr
+        stream = self.process.stderr
         while True:
-            line = await self.process.stderr.readline()
+            line = await stream.readline()
             if not line:
                 break
             self.stderr_lines.append(line.decode(errors="replace").rstrip())
@@ -246,8 +255,10 @@ class AppServerClient:
         matched = None
         for _ in range(self._notifications.qsize()):
             message = self._notifications.get_nowait()
-            if matched is None and message.get("method") == method and (
-                predicate is None or predicate(message)
+            if (
+                matched is None
+                and message.get("method") == method
+                and (predicate is None or predicate(message))
             ):
                 matched = message
             else:
@@ -305,7 +316,7 @@ class AppServerClient:
     async def thread_resume(
         self, thread_id: str, *, cwd: str | None = None, model: str | None = None
     ) -> dict[str, Any]:
-        params: dict[str, Any] = {"threadId": thread_id, "excludeTurns": False}
+        params: dict[str, Any] = {"threadId": thread_id, "excludeTurns": True}
         if cwd:
             params["cwd"] = str(Path(cwd).resolve())
         if model:
@@ -318,6 +329,20 @@ class AppServerClient:
         return await self.request(
             "thread/read", {"threadId": thread_id, "includeTurns": include_turns}
         )
+
+    async def thread_inspect_latest(self, thread_id: str) -> dict[str, Any]:
+        result = await self.thread_read(thread_id, include_turns=False)
+        page = await self.request(
+            "thread/turns/list",
+            {
+                "threadId": thread_id,
+                "limit": 1,
+                "sortDirection": "desc",
+                "itemsView": "notLoaded",
+            },
+        )
+        result["thread"]["turns"] = page.get("data", [])
+        return result
 
     async def thread_set_name(self, thread_id: str, name: str) -> dict[str, Any]:
         return await self.request(
@@ -377,9 +402,7 @@ class AppServerClient:
             if not cursor:
                 return threads
 
-    async def find_project_for_path(
-        self, path: str | Path
-    ) -> dict[str, Any] | None:
+    async def find_project_for_path(self, path: str | Path) -> dict[str, Any] | None:
         target = str(Path(path).expanduser().resolve()).casefold()
         for project in await self.project_list():
             for root in project.get("roots", []):

@@ -19,6 +19,7 @@ When creating tasks:
 - Default `workspace_mode` to `project` so Harbor uses the current Codex Project/conversation workspace. Use `isolated` only when the user explicitly wants a separate Harbor worktree.
 - When the user splits one objective into ordered Tasks, prefer `POST /api/task-groups`. Use `session_mode: shared` when later Tasks should inherit the preceding Codex conversation, or `isolated` when each Task needs its own Session.
 - Include the current Codex Project ID and originating Thread ID when they are available. If only the Project root is known, Harbor discovers the matching Project; never guess a Thread ID.
+- `origin_thread_id` alone records provenance, not a request to resume it. To continue a specific conversation, use `conversation_mode: existing` and `thread_id`. A Project ID is optional for this path. For automatic quota recovery of the current task, use the bundled `harbor-auto-resume` skill and `/api/recovery-watches`; do not submit an ordinary new task.
 - Shared-session groups must be sequential. A terminal upstream failure blocks later Tasks; `WAIT_QUOTA` is resumable and does not permanently block the chain.
 
 Project workspaces are user-owned existing checkouts. Tasks targeting the same

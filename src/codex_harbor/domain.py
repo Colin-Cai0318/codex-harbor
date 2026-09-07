@@ -57,6 +57,7 @@ class ConversationMode(StrEnum):
 
 
 class ErrorType(StrEnum):
+    THREAD_BUSY = "THREAD_BUSY"
     RATE_LIMIT_5H = "RATE_LIMIT_5H"
     RATE_LIMIT_WEEKLY = "RATE_LIMIT_WEEKLY"
     NETWORK = "NETWORK"
@@ -97,7 +98,12 @@ ALLOWED_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
         TaskStatus.CANCELLED,
     },
     TaskStatus.WAIT_DEP: {TaskStatus.READY, TaskStatus.BLOCKED, TaskStatus.CANCELLED},
-    TaskStatus.READY: {TaskStatus.CLAIMED, TaskStatus.BLOCKED, TaskStatus.CANCELLED},
+    TaskStatus.READY: {
+        TaskStatus.CLAIMED,
+        TaskStatus.BLOCKED,
+        TaskStatus.CANCELLED,
+        TaskStatus.WAIT_QUOTA,
+    },
     TaskStatus.CLAIMED: {
         TaskStatus.RUNNING,
         TaskStatus.READY,
