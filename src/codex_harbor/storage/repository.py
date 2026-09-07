@@ -208,6 +208,15 @@ class HarborRepository:
             "INSERT INTO task_dependencies(task_id, depends_on) VALUES(?, ?)",
             [(task_id, dependency) for dependency in dependencies],
         )
+        if spec.conversation_mode == "existing" and spec.origin_thread_id:
+            self._bind_thread(
+                conn,
+                task_id,
+                spec.origin_thread_id,
+                ThreadRole.ROOT,
+                model=spec.model,
+                project_id=spec.codex_project_id,
+            )
         self._event(conn, task_id, "TASK_CREATED", {"title": spec.title})
         self._set_status(conn, task_id, TaskStatus.PENDING)
         target = TaskStatus.WAIT_DEP if dependencies else TaskStatus.READY
@@ -288,7 +297,8 @@ class HarborRepository:
                     origin_thread_id=item.origin_thread_id or origin_thread_id,
                     session_parent_task_id=parent_id,
                     reuse_parent_worktree=(
-                        reuse_worktree if parent_id and mode == SessionMode.SHARED
+                        reuse_worktree
+                        if parent_id and mode == SessionMode.SHARED
                         else item.reuse_parent_worktree
                     ),
                     workspace_mode=(
@@ -531,6 +541,11 @@ class HarborRepository:
     ) -> dict[str, Any] | None:
         with self.db.transaction(immediate=True) as conn:
             conditions = ["t.status='READY'"]
+            conditions.append(
+                "(t.root_thread_id IS NULL OR NOT EXISTS (SELECT 1 FROM tasks a "
+                "WHERE a.root_thread_id=t.root_thread_id AND a.id<>t.id "
+                "AND a.status IN ('CLAIMED','RUNNING','WAIT_QUOTA','RETRY_WAIT')))"
+            )
             if grandfathered_only:
                 conditions.append("t.grandfathered=1")
             conditions.append(
@@ -650,45 +665,66 @@ class HarborRepository:
         model: str | None = None,
         project_id: str | None = None,
     ) -> None:
-        now = utc_now()
         with self.db.transaction(immediate=True) as conn:
-            conn.execute(
-                """INSERT INTO codex_threads(
-                       thread_id, task_id, role, parent_thread_id, state, model,
-                       project_id, created_at, last_used_at
-                   ) VALUES(?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?)
-                   ON CONFLICT(thread_id) DO UPDATE SET
-                       state='ACTIVE', last_used_at=excluded.last_used_at,
-                       project_id=COALESCE(excluded.project_id, codex_threads.project_id)""",
-                (
-                    thread_id,
-                    task_id,
-                    role,
-                    parent_thread_id,
-                    model,
-                    project_id,
-                    now,
-                    now,
-                ),
-            )
-            conn.execute(
-                """INSERT INTO task_thread_links(
-                       task_id, thread_id, role, inherited_from_task_id, linked_at
-                   ) VALUES(?, ?, ?, NULL, ?)
-                   ON CONFLICT(task_id, thread_id) DO UPDATE SET role=excluded.role""",
-                (task_id, thread_id, role, now),
-            )
-            if role == ThreadRole.ROOT:
-                conn.execute(
-                    "UPDATE tasks SET root_thread_id=?, updated_at=? WHERE id=?",
-                    (thread_id, now, task_id),
-                )
-            self._event(
+            self._bind_thread(
                 conn,
                 task_id,
-                "CODEX_THREAD_CREATED",
-                {"thread_id": thread_id, "role": role},
+                thread_id,
+                role,
+                parent_thread_id=parent_thread_id,
+                model=model,
+                project_id=project_id,
             )
+
+    def _bind_thread(
+        self,
+        conn,
+        task_id,
+        thread_id,
+        role,
+        *,
+        parent_thread_id=None,
+        model=None,
+        project_id=None,
+    ):
+        now = utc_now()
+        conn.execute(
+            """INSERT INTO codex_threads(
+                   thread_id, task_id, role, parent_thread_id, state, model,
+                   project_id, created_at, last_used_at
+               ) VALUES(?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?)
+               ON CONFLICT(thread_id) DO UPDATE SET
+                   state='ACTIVE', last_used_at=excluded.last_used_at,
+                   project_id=COALESCE(excluded.project_id, codex_threads.project_id)""",
+            (
+                thread_id,
+                task_id,
+                role,
+                parent_thread_id,
+                model,
+                project_id,
+                now,
+                now,
+            ),
+        )
+        conn.execute(
+            """INSERT INTO task_thread_links(
+                   task_id, thread_id, role, inherited_from_task_id, linked_at
+               ) VALUES(?, ?, ?, NULL, ?)
+               ON CONFLICT(task_id, thread_id) DO UPDATE SET role=excluded.role""",
+            (task_id, thread_id, role, now),
+        )
+        if role == ThreadRole.ROOT:
+            conn.execute(
+                "UPDATE tasks SET root_thread_id=?, updated_at=? WHERE id=?",
+                (thread_id, now, task_id),
+            )
+        self._event(
+            conn,
+            task_id,
+            "CODEX_THREAD_CREATED",
+            {"thread_id": thread_id, "role": role},
+        )
 
     def link_shared_thread(
         self,

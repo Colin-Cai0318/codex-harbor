@@ -12,6 +12,12 @@ Base URL: `http://127.0.0.1:8765`
 | Pool | `GET /api/pool`, `PATCH /api/pool`, `POST /api/pool/pause`, `/freeze`, `/resume` |
 | Runtime | `GET /api/quota`, `GET /api/models`, `GET /api/profiles`, `GET /api/workers`, `GET /api/codex/projects`, `GET /api/codex/projects/{id}/threads` |
 | History | `GET /api/events?task_id=T001&limit=200` |
+| Automatic recovery | `GET/POST /api/recovery-watches`, `POST /api/recovery-watches/{id}/cancel` |
+
+For explicit existing conversations, `codex_project_id` is optional and
+`thread_id` is required. The root thread is bound atomically, and recovery cannot
+fork. `origin_thread_id` alone is provenance. New-conversation tasks create their
+thread when their worker starts, so a queued task may have a null root thread ID.
 
 Project-driven task creation body (preferred):
 

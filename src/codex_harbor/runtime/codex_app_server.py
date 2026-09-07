@@ -31,11 +31,14 @@ class CodexAppServerRuntime(AgentRuntime):
         *,
         approval_policy: str = "never",
         sandbox: str = "workspace-write",
+        isolated_workers: bool = False,
     ):
         self.client = client
         self.approval_policy = approval_policy
         self.sandbox = sandbox
+        self.isolated_workers = isolated_workers
         self.active_turns: dict[str, str] = {}
+        self.turn_clients: dict[str, AppServerClient] = {}
 
     async def start_task(
         self, cwd: str, prompt: str, config: EffectiveAgentConfig
@@ -69,10 +72,12 @@ class CodexAppServerRuntime(AgentRuntime):
         )
         turn_id = _turn_id(result)
         self.active_turns[thread_id] = turn_id
+        self.turn_clients[thread_id] = self.client
         try:
             completed = await self.client.wait_turn(thread_id, turn_id)
         finally:
             self.active_turns.pop(thread_id, None)
+            self.turn_clients.pop(thread_id, None)
         error = completed.get("error")
         return RuntimeTurnResult(
             thread_id=thread_id,
@@ -85,7 +90,7 @@ class CodexAppServerRuntime(AgentRuntime):
     async def interrupt_task(self, thread_id: str) -> None:
         turn_id = self.active_turns.get(thread_id)
         if turn_id:
-            await self.client.request(
+            await self.turn_clients.get(thread_id, self.client).request(
                 "turn/interrupt", {"threadId": thread_id, "turnId": turn_id}
             )
 

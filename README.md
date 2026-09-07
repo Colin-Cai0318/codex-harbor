@@ -18,6 +18,37 @@ recovery across processes.
 
 </div>
 
+## Recover the current conversation after quota exhaustion
+
+Install `integrations/plugins/codex-harbor/skills/harbor-auto-resume` into
+`$CODEX_HOME/skills/` (or `~/.codex/skills/`) and ask Codex to automatically resume
+the current task. The skill immediately registers a durable recovery watch. Harbor
+creates a task at 95% primary-window usage and waits for a confirmed quota failure
+and fresh available quota before resuming the **same thread** with the recorded
+model and effort. Normal completion disarms the watch. Keep the Harbor daemon running.
+
+Registration and task creation do not depend on model inference. Opt in using
+`PATCH /api/recovery-settings` with `allow_luna_reserve: true`. If primary quota is
+exhausted and no recovery task exists, Harbor can use one same-thread Luna Reserve
+turn (`gpt-reserve / xhigh`) to prepare a continuation summary and create the task.
+This is the separate reserve model, not ordinary `gpt-5.6-luna`. Existing tasks do
+not spend reserve. Unavailable reserve falls back to direct task creation, and
+resumed work retains the recorded main model settings.
+
+Use `GET/POST /api/recovery-watches` and
+`POST /api/recovery-watches/{id}/cancel` to inspect, arm, and cancel protection.
+Manual continuation accepts `conversation_mode: "existing"`, `thread_id`, and
+`message` at `POST /api/tasks`, with an optional Project ID. `origin_thread_id`
+alone is provenance, not a request to continue that conversation.
+
+Workers now own separate App Server processes and close them when settling or
+waiting. Active work still holds a writer lock. If the desktop owns that lock,
+Harbor retries the same thread without consuming failure attempts. Explicit
+existing-conversation tasks never silently fork. New conversations are created
+when execution starts, so queued tasks can have a null Thread ID.
+
+See [review and validation](docs/REVIEW-2026-09-07.md).
+
 ---
 
 Codex Harbor is a local-first control plane built on top of Codex App Server.
@@ -101,7 +132,7 @@ lifecycle and quota control; it is not a second chat-history implementation.
 | Task | Business objective, repository, prompt, acceptance, dependencies, and scheduling state | Until explicitly deleted |
 | Codex Project | App-owned collection of roots and durable threads | Shared by Codex and Harbor |
 | Root Thread | A durable Codex session and conversation history | One task normally owns it; a task chain may share it |
-| Recovery Thread | A fork/new thread used only if the prior thread cannot be resumed | Linked to the same Task |
+| Recovery Thread | Legacy unspecified-mode tasks can fork on failed resume; explicit existing conversations cannot | Linked to the same Task |
 | Turn | One prompt execution inside a Thread | Recorded with its Thread and execution number |
 | Counted failure | A runtime or acceptance failure that consumes the configured retry budget | Separate from the Turn count |
 
@@ -232,7 +263,7 @@ The dashboard now follows the Codex desktop mental model:
 
 1. Select a **Codex Project**. Harbor loads that Project's durable conversations.
 2. Select **Existing conversation** to continue its context and cwd, or **New
-   conversation** to create a durable Codex conversation immediately.
+   conversation** to create a durable Codex conversation when its worker starts.
 3. For a new conversation, add one or more absolute workspace directories and
    select the primary one. The primary directory must be inside a Git checkout;
    additional directories are sent as Codex runtime workspace roots.

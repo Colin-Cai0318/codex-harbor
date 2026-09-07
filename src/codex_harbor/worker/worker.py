@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ..acceptance import AcceptanceRunner
-from ..codex import AppServerError, ModelRegistry, ModelValidationError
+from ..codex import AppServerClient, AppServerError, ModelRegistry, ModelValidationError
 from ..domain import (
     EffectiveAgentConfig,
     ErrorType,
@@ -25,6 +25,21 @@ from ..storage import HarborRepository
 
 def classify_error(message: str) -> ErrorType:
     lowered = message.lower()
+    if any(
+        token in lowered
+        for token in (
+            "already open",
+            "opened elsewhere",
+            "another process",
+            "another client",
+            "already in use",
+            "thread is busy",
+            "threadbusy",
+            "threadlocked",
+            "already has an active writer",
+        )
+    ):
+        return ErrorType.THREAD_BUSY
     if any(
         token in lowered
         for token in ("weekly limit", "weekly quota", "secondary rate limit")
@@ -57,9 +72,15 @@ def classify_error(message: str) -> ErrorType:
     if any(
         token in lowered
         for token in (
-            "network", "connection reset", "timed out", "timeout",
-            "error sending request", "connection refused", "broken pipe",
-            "app server stdout closed", "app server closed",
+            "network",
+            "connection reset",
+            "timed out",
+            "timeout",
+            "error sending request",
+            "connection refused",
+            "broken pipe",
+            "app server stdout closed",
+            "app server closed",
         )
     ):
         return ErrorType.NETWORK
@@ -192,9 +213,9 @@ class Worker:
         suffix = " · Recovery" if recovery else ""
         group = task.get("task_group")
         name = (
-            f'[{group["id"]}] {group["title"]}{suffix}'
+            f"[{group['id']}] {group['title']}{suffix}"
             if group and group.get("session_mode") == "shared"
-            else f'[{task["id"]}] {task["title"]}{suffix}'
+            else f"[{task['id']}] {task['title']}{suffix}"
         )
         try:
             await self.runtime.client.thread_set_name(thread_id, name)
@@ -206,11 +227,7 @@ class Worker:
             )
 
     def _quota_resume_at(self, error_type: ErrorType) -> str:
-        quota_type = (
-            "PRIMARY_5H"
-            if error_type == ErrorType.RATE_LIMIT_5H
-            else "WEEKLY"
-        )
+        quota_type = "PRIMARY_5H" if error_type == ErrorType.RATE_LIMIT_5H else "WEEKLY"
         now = datetime.now(UTC)
         for quota in self.repository.list_quotas():
             if quota["quota_type"] != quota_type or not quota.get("reset_at"):
@@ -290,9 +307,7 @@ class Worker:
             )
             if not parent_thread:
                 raise GitError(f"session parent {parent['id']} has no Codex thread")
-            project_id = task.get("codex_project_id") or parent.get(
-                "codex_project_id"
-            )
+            project_id = task.get("codex_project_id") or parent.get("codex_project_id")
             self.repository.link_shared_thread(
                 task["id"], parent_thread, parent["id"], project_id=project_id
             )
@@ -363,6 +378,10 @@ class Worker:
         active_thread = (
             threads[-1]["thread_id"] if threads else task.get("root_thread_id")
         )
+        if task.get("conversation_mode") == "existing" and not active_thread:
+            raise AppServerError(
+                "selected original conversation has no bound thread id"
+            )
         if active_thread:
             parent = (
                 self.repository.get_task(task["session_parent_task_id"])
@@ -394,9 +413,16 @@ class Worker:
                 )
                 return result
             except AppServerError as error:
+                if task.get("conversation_mode") == "existing":
+                    # An explicitly selected conversation is an identity contract.
+                    # A failed resume must never silently fork or start a new one.
+                    raise
                 if classify_error(str(error)) in {
-                    ErrorType.RATE_LIMIT_5H, ErrorType.RATE_LIMIT_WEEKLY,
-                    ErrorType.AUTH, ErrorType.NETWORK,
+                    ErrorType.RATE_LIMIT_5H,
+                    ErrorType.RATE_LIMIT_WEEKLY,
+                    ErrorType.AUTH,
+                    ErrorType.NETWORK,
+                    ErrorType.THREAD_BUSY,
                 }:
                     raise
                 if isinstance(self.runtime, CodexAppServerRuntime):
@@ -430,11 +456,12 @@ class Worker:
                         )
                     except AppServerError as error:
                         if classify_error(str(error)) in {
-                            ErrorType.RATE_LIMIT_5H, ErrorType.RATE_LIMIT_WEEKLY,
-                            ErrorType.AUTH, ErrorType.NETWORK,
+                            ErrorType.RATE_LIMIT_5H,
+                            ErrorType.RATE_LIMIT_WEEKLY,
+                            ErrorType.AUTH,
+                            ErrorType.NETWORK,
                         }:
                             raise
-                        pass
         if isinstance(self.runtime, CodexAppServerRuntime):
             started = await self.runtime.client.thread_start(
                 cwd=codex_cwd,
@@ -471,18 +498,13 @@ class Worker:
                 and int(task.get("current_attempt", 0)) == 0
                 else initial_prompt(task)
             )
-            return await self.runtime.start_turn(
-                thread_id, codex_cwd, prompt, config
-            )
+            return await self.runtime.start_turn(thread_id, codex_cwd, prompt, config)
         prompt = (
             task["prompt"]
-            if task.get("direct_prompt")
-            and int(task.get("current_attempt", 0)) == 0
+            if task.get("direct_prompt") and int(task.get("current_attempt", 0)) == 0
             else initial_prompt(task)
         )
-        result = await self.runtime.start_task(
-            codex_cwd, prompt, config
-        )
+        result = await self.runtime.start_task(codex_cwd, prompt, config)
         self.repository.set_thread(
             task["id"], result.thread_id, ThreadRole.ROOT, model=config.effective_model
         )
@@ -498,8 +520,7 @@ class Worker:
             attempt,
             (
                 "WAIT_QUOTA"
-                if error_type
-                in {ErrorType.RATE_LIMIT_5H, ErrorType.RATE_LIMIT_WEEKLY}
+                if error_type in {ErrorType.RATE_LIMIT_5H, ErrorType.RATE_LIMIT_WEEKLY}
                 else "FAILED"
             ),
             error_type=error_type,
@@ -526,6 +547,13 @@ class Worker:
             self.repository.transition(
                 task["id"], TaskStatus.BLOCKED, reason=error_type
             )
+        elif error_type == ErrorType.THREAD_BUSY:
+            self.repository.transition(
+                task["id"],
+                TaskStatus.RETRY_WAIT,
+                reason=error_type,
+                resume_at=(datetime.now(UTC) + timedelta(seconds=60)).isoformat(),
+            )
         else:
             failure_count = self.repository.record_failure(task["id"])
             if failure_count >= int(task["max_attempts"]):
@@ -543,6 +571,26 @@ class Worker:
                 )
 
     async def run(self, task: dict[str, Any]) -> None:
+        if (
+            isinstance(self.runtime, CodexAppServerRuntime)
+            and self.runtime.isolated_workers
+        ):
+            shared = self.runtime
+            async with AppServerClient(
+                shared.client.executable, request_timeout=shared.client.request_timeout
+            ) as client:
+                self.runtime = CodexAppServerRuntime(
+                    client,
+                    approval_policy=shared.approval_policy,
+                    sandbox=shared.sandbox,
+                )
+                self.runtime.active_turns = shared.active_turns
+                self.runtime.turn_clients = shared.turn_clients
+                try:
+                    await self.run(task)
+                finally:
+                    self.runtime = shared
+            return
         self._task_id = task["id"]
         self.repository.worker_heartbeat(
             self.worker_id, self._task_id, "STARTING", os.getpid()

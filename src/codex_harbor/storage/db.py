@@ -6,6 +6,28 @@ from contextlib import contextmanager
 from pathlib import Path
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS recovery_settings (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    allow_luna_reserve INTEGER NOT NULL DEFAULT 0
+);
+INSERT OR IGNORE INTO recovery_settings(id,allow_luna_reserve) VALUES(1,0);
+CREATE TABLE IF NOT EXISTS recovery_watches (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL,
+    spec TEXT NOT NULL,
+    threshold REAL NOT NULL,
+    baseline_turn_id TEXT,
+    baseline_status TEXT,
+    state TEXT NOT NULL DEFAULT 'ARMED',
+    task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+    reserve_status TEXT,
+    reserve_note TEXT,
+    reserve_turn_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS active_recovery_thread ON recovery_watches(thread_id)
+    WHERE state IN ('ARMED', 'WAITING', 'HANDED_OFF');
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER PRIMARY KEY,
     applied_at TEXT NOT NULL
@@ -195,6 +217,15 @@ class Database:
         max_workers = max(1, min(64, int(max_workers)))
         with self.connect() as connection:
             connection.executescript(SCHEMA)
+            watch_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(recovery_watches)")
+            }
+            for column in ("reserve_status", "reserve_note", "reserve_turn_id"):
+                if column not in watch_columns:
+                    connection.execute(
+                        f"ALTER TABLE recovery_watches ADD COLUMN {column} TEXT"
+                    )
             task_columns = {
                 row["name"] for row in connection.execute("PRAGMA table_info(tasks)")
             }
@@ -242,8 +273,7 @@ class Database:
                     "ALTER TABLE codex_threads ADD COLUMN project_id TEXT"
                 )
             attempt_columns = {
-                row["name"]
-                for row in connection.execute("PRAGMA table_info(attempts)")
+                row["name"] for row in connection.execute("PRAGMA table_info(attempts)")
             }
             if "turn_id" not in attempt_columns:
                 connection.execute("ALTER TABLE attempts ADD COLUMN turn_id TEXT")
@@ -315,8 +345,10 @@ class Database:
                         (
                             task_id,
                             now,
-                            '{"from":"FAILED","to":"WAIT_QUOTA",'
-                            '"reason":"usageLimitExceeded"}',
+                            (
+                                '{"from":"FAILED","to":"WAIT_QUOTA",'
+                                '"reason":"usageLimitExceeded"}'
+                            ),
                         ),
                     )
                 connection.execute(

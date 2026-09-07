@@ -73,6 +73,8 @@ class QuotaManager:
         now = datetime.now(UTC).isoformat()
         changed = 0
         for task in self.repository.list_tasks([TaskStatus.WAIT_QUOTA]):
+            if task.get("blocked_reason") == "AUTO_RESUME_ARMED":
+                continue
             if not task.get("resume_at") or task["resume_at"] <= now:
                 self.repository.transition(task["id"], TaskStatus.READY)
                 changed += 1

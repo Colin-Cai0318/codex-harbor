@@ -14,9 +14,7 @@ class FakeProjectClient:
         self.names: list[tuple[str, str]] = []
 
     async def project_list(self):
-        return [
-            {"id": "project-1", "name": "Project", "roots": [{"path": self.root}]}
-        ]
+        return [{"id": "project-1", "name": "Project", "roots": [{"path": self.root}]}]
 
     async def project_read(self, project_id):
         assert project_id == "project-1"
@@ -101,9 +99,9 @@ def test_api_and_dashboard(repository, git_repo):
         {"name": "deep_debug", "reasoning_effort": "high"}
     ]
     assert (
-        client.patch(
-            "/api/pool", json={"freeze_on_weekly_reset": False}
-        ).json()["freeze_on_weekly_reset"]
+        client.patch("/api/pool", json={"freeze_on_weekly_reset": False}).json()[
+            "freeze_on_weekly_reset"
+        ]
         == 0
     )
     assert client.patch("/api/pool", json={"max_workers": 7}).json()["max_workers"] == 7
@@ -224,13 +222,8 @@ def test_project_driven_creation_creates_codex_thread_with_workspace_roots(
     )
     assert created.status_code == 201, created.text
     task = created.json()
-    assert task["root_thread_id"] == "new-thread"
+    assert task["root_thread_id"] is None
     assert task["conversation_mode"] == "new"
     assert task["runtime_workspace_roots"] == [str(git_repo), str(extra)]
-    assert app_client.started[0]["project_id"] == "project-1"
-    assert app_client.started[0]["cwd"] == str(git_repo)
-    assert app_client.started[0]["runtime_workspace_roots"] == [
-        str(git_repo),
-        str(extra),
-    ]
-    assert app_client.names[0][0] == "new-thread"
+    assert app_client.started == []
+    assert app_client.names == []
