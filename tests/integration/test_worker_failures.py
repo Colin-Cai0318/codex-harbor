@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime
+
 import pytest
 
 from codex_harbor.acceptance import AcceptanceRunner
@@ -327,6 +330,18 @@ async def test_explicit_original_thread_never_forks_and_busy_does_not_exhaust_re
     assert client.started == 0
     assert result["status"] == ("RETRY_WAIT" if busy else "FAILED")
     assert result["failure_count"] == (0 if busy else 1)
+    if busy:
+        for expected_delay in (120, 240, 480, 960, 1800, 1800):
+            repository.transition(task["id"], TaskStatus.READY)
+            await worker.run(repository.claim_next("original-worker"))
+            result = repository.get_task(task["id"])
+            delay = (
+                datetime.fromisoformat(result["resume_at"]) - datetime.now(UTC)
+            ).total_seconds()
+            assert expected_delay - 5 <= delay <= expected_delay
+            assert result["failure_count"] == 0
+            assert result["root_thread_id"] == "thread-old"
+        assert client.started == 0
 
 
 @pytest.mark.asyncio
@@ -370,3 +385,12 @@ async def test_worker_closes_its_own_client_on_quota_wait(
     assert closed == [session]
     assert worker.runtime is runtime
     assert control.started == 0
+    checkpoint = json.loads(
+        (tmp_path / "data" / "tasks" / task["id"] / "recovery.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert checkpoint["stage"] == "WAIT_QUOTA"
+    assert "usageLimitExceeded" in checkpoint["last_reason"]
+    assert checkpoint["thread_id"] == "thread-old"
+    assert checkpoint["agent"]["last_effective_model"] == "model-a"
