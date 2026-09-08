@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS recovery_watches (
     threshold REAL NOT NULL,
     baseline_turn_id TEXT,
     baseline_status TEXT,
+    trigger_mode TEXT NOT NULL DEFAULT 'on_failure',
+    resume_after TEXT,
     state TEXT NOT NULL DEFAULT 'ARMED',
     task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
     reserve_status TEXT,
@@ -242,6 +244,14 @@ class Database:
                     connection.execute(
                         f"ALTER TABLE recovery_watches ADD COLUMN {column} TEXT"
                     )
+            if "trigger_mode" not in watch_columns:
+                connection.execute(
+                    "ALTER TABLE recovery_watches ADD COLUMN trigger_mode TEXT NOT NULL DEFAULT 'on_failure'"
+                )
+            if "resume_after" not in watch_columns:
+                connection.execute(
+                    "ALTER TABLE recovery_watches ADD COLUMN resume_after TEXT"
+                )
             task_columns = {
                 row["name"] for row in connection.execute("PRAGMA table_info(tasks)")
             }

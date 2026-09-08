@@ -5,9 +5,18 @@ description: 当用户说“自动恢复当前任务”“额度恢复后继续�
 
 # 自动恢复当前任务
 
-用户提出自动恢复即授权登记本次任务的保护。立即登记，不要等到主模型已经无法调用工具。Harbor 在后台监测 5h 用量，默认达到 95% 时创建 task；只有确认原轮次因额度失败，且额度恢复后才运行。登记和创建 task 都是本地数据库操作，不需要模型推理，也不会消耗 Luna 储备额度。
+用户提出自动恢复即授权登记本次任务的保护。立即登记，不要等到主模型已经无法调用工具。登记和创建 task 都是本地数据库操作，不需要模型推理，也不会消耗 Luna 储备额度。
+
+按用户表达选择触发方式：
+
+- “设置任务重置后恢复”“等重置后继续”使用 `trigger_mode: after_reset`。同时传入 `resume_after`，取自 `/api/quota` 的实际重置时间（带时区）。立即创建一次恢复 task，本轮登记回复正常结束不会取消。到达记录的时间、最新主额度可用、原对话没有活动轮次后交给调度器执行。重启保留预约，取消须显式操作。
+- “执行中额度耗尽时自动恢复”使用 `trigger_mode: on_failure`（API 默认）。达到 95% 时预建 task；确认原轮次因额度失败且额度恢复后运行。正常结束回复会解除此模式的保护，不能用于预约结束回复后的续接。
+
+额度已恢复时，使用之前已确认的重置时间，不要把下一周期的边界当成之前的恢复时间。没有可核实的时间时先补充信息，不猜日期。任务池暂停或冻结仍会阻止业务执行。
 
 使用本技能目录下的 `scripts/auto_resume.py`。Python 可用 `python`、`py`，或 Harbor 仓库内的 `uv run python`。从当前上下文取得主模型和 reasoning effort；写入 UTF-8 JSON 文件：
+
+主模型指恢复后执行业务工作的模型。当前若正在储备轮次中，不能将 `gpt-reserve` 写为主模型；使用已确认的耗尽前主模型与推理等级，不能猜测或静默降级。API 会拒绝以储备模型登记业务恢复。
 
 ```json
 {
@@ -16,11 +25,14 @@ description: 当用户说“自动恢复当前任务”“额度恢复后继续�
   "model": "实际主模型名称",
   "reasoning_effort": "实际推理等级",
   "threshold": 95,
+  "trigger_mode": "on_failure",
   "acceptance_commands": []
 }
 ```
 
 在 prompt 中补充本次任务的具体目标、剩余工作和验收条件，不复制整段对话。不要臆造验收成功。运行：
+
+预约模式需将上述 JSON 的 `trigger_mode` 改为 `after_reset`，并增加 `resume_after` 字段，值为核实过的 ISO 8601 重置时间。
 
 ```text
 python <本技能目录>/scripts/auto_resume.py arm --file <UTF-8-JSON文件>
@@ -44,7 +56,7 @@ python <本技能目录>/scripts/auto_resume.py settings
 
 不要把普通 Luna 的调用成功说成已使用储备。不要修改服务端功能开关、充值、购买重置或扩大账户额度。用户的授权是使用已有的 Luna Reserve。未要求储备兜底时保留现有设置；可用上述 settings 命令设为 false 禁用。
 
-原对话正常完成会自动解除保护；登记后需要取消时运行：
+仅 `on_failure` 模式会在原轮次正常结束时自动解除保护。`after_reset` 预约不会因登记确认回复结束而解除；登记后需要取消时运行：
 
 ```text
 python <本技能目录>/scripts/auto_resume.py cancel <保护ID>

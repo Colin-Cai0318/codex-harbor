@@ -96,7 +96,32 @@ class AutoResumeManager:
             },
         )
 
-    def arm(self, spec: TaskSpec, thread: dict, threshold: float):
+    def arm(
+        self,
+        spec: TaskSpec,
+        thread: dict,
+        threshold: float,
+        *,
+        trigger_mode: str = "on_failure",
+        resume_after: str | None = None,
+    ):
+        if spec.model == RESERVE_MODEL:
+            raise ValueError(
+                "recovery requires the main model; gpt-reserve is checkpoint-only"
+            )
+        if trigger_mode not in {"on_failure", "after_reset"}:
+            raise ValueError("unknown recovery trigger mode")
+        if trigger_mode == "after_reset":
+            if not resume_after:
+                raise ValueError(
+                    "after_reset requires the observed reset time as resume_after"
+                )
+            boundary = datetime.fromisoformat(resume_after)
+            if boundary.tzinfo is None:
+                raise ValueError("resume_after requires a timezone")
+            resume_after = boundary.astimezone(UTC).isoformat()
+        elif resume_after is not None:
+            raise ValueError("resume_after is only valid for after_reset")
         turns = thread.get("turns") or []
         last = turns[-1] if turns else {}
         now = utc_now()
@@ -107,12 +132,16 @@ class AutoResumeManager:
                 (spec.origin_thread_id,),
             ).fetchone()
             if existing:
+                if existing["trigger_mode"] != trigger_mode:
+                    raise ValueError(
+                        "cancel the existing watch before changing its trigger mode"
+                    )
                 return dict(existing)
             watch_id = f"R{uuid.uuid4().hex[:12]}"
             conn.execute(
                 "INSERT INTO recovery_watches(id,thread_id,spec,threshold,"
-                "baseline_turn_id,baseline_status,created_at,updated_at) "
-                "VALUES(?,?,?,?,?,?,?,?)",
+                "baseline_turn_id,baseline_status,created_at,updated_at,trigger_mode,resume_after) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?)",
                 (
                     watch_id,
                     spec.origin_thread_id,
@@ -122,8 +151,22 @@ class AutoResumeManager:
                     last.get("status"),
                     now,
                     now,
+                    trigger_mode,
+                    resume_after,
                 ),
             )
+            if trigger_mode == "after_reset":
+                task_id = self.repository._insert_task(conn, spec, spec.repository, now)
+                self.repository._set_status(
+                    conn, task_id, TaskStatus.WAIT_QUOTA, reason="AUTO_RESUME_ARMED"
+                )
+                conn.execute(
+                    "UPDATE tasks SET resume_at=? WHERE id=?", (resume_after, task_id)
+                )
+                conn.execute(
+                    "UPDATE recovery_watches SET task_id=?,state='WAITING' WHERE id=?",
+                    (task_id, watch_id),
+                )
             return dict(
                 conn.execute(
                     "SELECT * FROM recovery_watches WHERE id=?", (watch_id,)
@@ -156,8 +199,10 @@ class AutoResumeManager:
         for watch in self.list():
             if watch["state"] == "HANDED_OFF":
                 task = self.repository.get_task(watch["task_id"])
-                if task["current_attempt"] == 0 and hasattr(
-                    self.client, "thread_inspect_latest"
+                if (
+                    watch["trigger_mode"] == "on_failure"
+                    and task["current_attempt"] == 0
+                    and hasattr(self.client, "thread_inspect_latest")
                 ):
                     try:
                         inspected = await self.client.thread_inspect_latest(
@@ -198,6 +243,52 @@ class AutoResumeManager:
                 thread = inspected.get("thread", inspected)
                 turns = thread.get("turns") or []
                 last = turns[-1] if turns else {}
+                if watch["trigger_mode"] == "after_reset":
+                    # A scheduling acknowledgement may finish normally. Only an
+                    # explicit cancellation or the scheduled task ends this watch.
+                    if last.get("status") not in {"completed", "failed", "interrupted"}:
+                        continue
+                    if (
+                        not primary
+                        or not primary.available
+                        or any(not window.available for window in windows)
+                        or datetime.now(UTC)
+                        < datetime.fromisoformat(watch["resume_after"])
+                    ):
+                        continue
+                    with self.repository.db.transaction(immediate=True) as conn:
+                        current = conn.execute(
+                            "SELECT * FROM recovery_watches WHERE id=?", (watch["id"],)
+                        ).fetchone()
+                        if current["state"] != "WAITING":
+                            continue
+                        task = conn.execute(
+                            "SELECT status FROM tasks WHERE id=?", (current["task_id"],)
+                        ).fetchone()
+                        if task["status"] != "WAIT_QUOTA":
+                            conn.execute(
+                                "UPDATE recovery_watches SET state='COMPLETED',updated_at=? WHERE id=?",
+                                (utc_now(), watch["id"]),
+                            )
+                            continue
+                        conn.execute(
+                            "UPDATE tasks SET blocked_reason='RESET_RESUME_CONFIRMED',updated_at=? WHERE id=?",
+                            (utc_now(), current["task_id"]),
+                        )
+                        conn.execute(
+                            "UPDATE recovery_watches SET state='HANDED_OFF',updated_at=? WHERE id=?",
+                            (utc_now(), watch["id"]),
+                        )
+                        self.repository._event(
+                            conn,
+                            current["task_id"],
+                            "AUTO_RESUME_RESET_CONFIRMED",
+                            {
+                                "thread_id": watch["thread_id"],
+                                "resume_after": watch["resume_after"],
+                            },
+                        )
+                    continue
                 reserve_finished = (
                     watch["reserve_status"] == "COMPLETED"
                     and last.get("id") == watch["reserve_turn_id"]

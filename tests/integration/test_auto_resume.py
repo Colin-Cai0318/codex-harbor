@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -38,6 +39,106 @@ def arm(repository, git_repo):
     )
     watch = manager.arm(spec, reader.thread, 95)
     return manager, reader, spec, watch
+
+
+@pytest.mark.asyncio
+async def test_explicit_reset_survives_acknowledgement_restart_and_handoff(
+    repository, git_repo
+):
+    manager, reader, spec, old = arm(repository, git_repo)
+    manager.cancel(old["id"])
+    past = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
+    watch = manager.arm(
+        spec, reader.thread, 95, trigger_mode="after_reset", resume_after=past
+    )
+    assert (
+        manager.arm(
+            spec, reader.thread, 95, trigger_mode="after_reset", resume_after=past
+        )["id"]
+        == watch["id"]
+    )
+    task_id = watch["task_id"]
+    assert repository.get_task(task_id)["status"] == "WAIT_QUOTA"
+    reader.thread["turns"][-1]["status"] = "completed"  # registration reply only
+    manager = AutoResumeManager(repository, reader)
+    exhausted = QuotaWindow("PRIMARY_5H", available=False, used_percent=100)
+    await manager.tick([exhausted])
+    assert manager.list()[-1]["state"] == "WAITING"
+    ready = QuotaWindow("PRIMARY_5H", available=True, used_percent=0)
+    await manager.tick([])
+    await manager.tick([ready, QuotaWindow("WEEKLY", available=False)])
+    assert manager.list()[-1]["state"] == "WAITING"
+    # Even with quota available, do not hand off while the desktop turn is active.
+    reader.thread["turns"][-1]["status"] = "inProgress"
+    await manager.tick([ready])
+    assert manager.list()[-1]["state"] == "WAITING"
+    reader.thread["turns"][-1]["status"] = "completed"
+    await manager.tick([ready])
+    assert manager.list()[-1]["state"] == "HANDED_OFF"
+    reader.thread_inspect_latest = AsyncMock(return_value={"thread": reader.thread})
+    reader.thread["turns"][-1]["id"] = "another-completed-reply"
+    await manager.tick([ready])
+    assert repository.get_task(task_id)["status"] == "WAIT_QUOTA"
+    quotas = QuotaManager(repository, FakeQuotaProvider([ready]))
+    await quotas.refresh()
+    assert quotas.release_quota_waiters() == 1
+    task = repository.claim_next("recovery")
+    assert (task["root_thread_id"], task["model"], task["reasoning_effort"]) == (
+        "original",
+        "model-a",
+        "high",
+    )
+    await manager.tick([ready])
+    assert len(repository.list_tasks()) == 1
+    manager.cancel(watch["id"])
+
+
+@pytest.mark.asyncio
+async def test_explicit_reset_keeps_boundary_and_honours_cancellation(
+    repository, git_repo
+):
+    manager, reader, spec, old = arm(repository, git_repo)
+    manager.cancel(old["id"])
+    future = (datetime.now(UTC) + timedelta(hours=5)).isoformat()
+    watch = manager.arm(
+        spec, reader.thread, 95, trigger_mode="after_reset", resume_after=future
+    )
+    reader.thread["turns"][-1]["status"] = "completed"
+    await manager.tick([QuotaWindow("PRIMARY_5H")])
+    assert repository.get_task(watch["task_id"])["status"] == "WAIT_QUOTA"
+    assert manager.list()[-1]["resume_after"] == future
+    manager.cancel(watch["id"])
+    await manager.tick([QuotaWindow("PRIMARY_5H")])
+    assert repository.get_task(watch["task_id"])["status"] == "CANCELLED"
+
+
+def test_reset_api_rejects_reserve_and_requires_observed_boundary(repository, git_repo):
+    reader = ThreadReader(git_repo)
+    client = TestClient(
+        create_app(repository, app_server_client=reader), base_url="http://127.0.0.1"
+    )
+    payload = {
+        "thread_id": "original",
+        "prompt": "continue",
+        "model": "model-a",
+        "reasoning_effort": "high",
+        "trigger_mode": "after_reset",
+    }
+    assert client.post("/api/recovery-watches", json=payload).status_code == 409
+    payload["resume_after"] = "2026-09-08T13:37:07"  # no timezone
+    assert client.post("/api/recovery-watches", json=payload).status_code == 422
+    payload["resume_after"] = "2026-09-08T13:37:07+08:00"
+    payload["model"] = "gpt-reserve"
+    assert client.post("/api/recovery-watches", json=payload).status_code == 409
+    assert repository.list_tasks() == []
+    payload["model"] = "model-a"
+    result = client.post("/api/recovery-watches", json=payload)
+    assert result.status_code == 201
+    assert result.json()["resume_after"] == "2026-09-08T05:37:07+00:00"
+    assert result.json()["state"] == "WAITING"
+    payload["trigger_mode"] = "on_failure"
+    payload.pop("resume_after")
+    assert client.post("/api/recovery-watches", json=payload).status_code == 409
 
 
 @pytest.mark.asyncio
@@ -119,7 +220,9 @@ def test_api_registers_current_thread_without_project_or_model_inference(
     repository, git_repo
 ):
     reader = ThreadReader(git_repo)
-    client = TestClient(create_app(repository, app_server_client=reader), base_url="http://127.0.0.1")
+    client = TestClient(
+        create_app(repository, app_server_client=reader), base_url="http://127.0.0.1"
+    )
     payload = {
         "thread_id": "original",
         "prompt": "Continue",
