@@ -96,6 +96,70 @@ async def test_concurrent_ticks_claim_once(repository):
     send.assert_awaited_once()
 
 
+async def test_reset_timestamp_jitter_does_not_send_twice(repository):
+    ping, send = manager(repository)
+    ping.set_enabled(True)
+    await ping.tick(windows(), now=NOW)
+    await ping.tick(windows(NOW + timedelta(seconds=1)), now=NOW + timedelta(seconds=2))
+    ping.set_enabled(False)
+    ping.set_enabled(True)
+    await ping.tick(windows(NOW + timedelta(seconds=1)), now=NOW + timedelta(seconds=2))
+    send.assert_awaited_once()
+
+
+async def test_small_reset_revision_is_not_timer_confirmation(repository):
+    ping, _ = manager(repository)
+    ping.set_enabled(True)
+    await ping.tick(windows(), now=NOW)
+    ping.observe_confirmation(windows(NOW + timedelta(seconds=1)), now=NOW)
+    assert ping.settings()["last_ping"]["next_reset_at"] is None
+
+
+async def test_expired_next_boundary_is_not_timer_confirmation(repository):
+    ping, _ = manager(repository)
+    ping.set_enabled(True)
+    await ping.tick(windows(), now=NOW)
+    ping.observe_confirmation(
+        windows(NOW + timedelta(days=7)), now=NOW + timedelta(days=8)
+    )
+    assert ping.settings()["last_ping"]["next_reset_at"] is None
+
+
+async def test_slow_ping_does_not_block_scheduler_and_shutdown(
+    repository, config_values, tmp_path
+):
+    from unittest.mock import Mock
+
+    from codex_harbor.domain import PoolStatus
+    from codex_harbor.scheduler import Scheduler
+
+    repository.set_pool(PoolStatus.FROZEN)
+    quota = Mock()
+    quota.refresh = AsyncMock(
+        return_value=windows(datetime.now(UTC) - timedelta(seconds=1))
+    )
+    scheduler = Scheduler(
+        repository, object(), object(), quota, Mock(), config_values, tmp_path
+    )
+    ping, send = manager(repository)
+    ping.set_enabled(True)
+    started = asyncio.Event()
+
+    async def slow(*args):
+        started.set()
+        await asyncio.Event().wait()
+
+    send.side_effect = slow
+    scheduler.weekly_ping = ping
+    try:
+        await asyncio.wait_for(scheduler.tick(), timeout=0.5)
+        await asyncio.wait_for(started.wait(), timeout=0.5)
+        await asyncio.wait_for(scheduler.tick(), timeout=0.5)
+        send.assert_awaited_once()
+    finally:
+        await asyncio.wait_for(scheduler.stop(), timeout=0.5)
+
+
 def test_api_persists_switch_and_preserves_reserve(repository):
     client = TestClient(create_app(repository))
     assert client.get("/api/weekly-ping").json()["enabled"] is False
@@ -176,5 +240,6 @@ async def test_frozen_pool_sends_but_failed_refresh_does_not(
     send.assert_not_awaited()
     quota.refresh.side_effect = None
     await scheduler.tick()
+    await scheduler.weekly_ping_task
     send.assert_awaited_once()
     assert repository.get_pool()["state"] == PoolStatus.FROZEN

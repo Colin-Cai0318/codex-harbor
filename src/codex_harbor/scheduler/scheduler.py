@@ -41,6 +41,7 @@ class Scheduler:
         self.running: dict[str, asyncio.Task[None]] = {}
         self.interrupting: set[str] = set()
         self.stopping = False
+        self.weekly_ping_task: asyncio.Task | None = None
         self.auto_resume = (
             AutoResumeManager(repository, runtime.client)
             if isinstance(runtime, CodexAppServerRuntime)
@@ -107,7 +108,10 @@ class Scheduler:
         else:
             if self.weekly_ping:
                 self.weekly_ping.observe_confirmation(windows)
-                await self.weekly_ping.tick(windows)
+                if self.weekly_ping_task is None or self.weekly_ping_task.done():
+                    self.weekly_ping_task = asyncio.create_task(
+                        self._run_weekly_ping(windows), name="harbor-weekly-ping"
+                    )
             if self.auto_resume:
                 await self.auto_resume.tick(windows)
             # Never release waiters using stale telemetry after a failed refresh.
@@ -142,6 +146,12 @@ class Scheduler:
                 worker.run(task), name=f"harbor-{task['id']}"
             )
 
+    async def _run_weekly_ping(self, windows) -> None:
+        try:
+            await self.weekly_ping.tick(windows)
+        except Exception as error:  # noqa: BLE001 - optional automation is isolated
+            self.repository.add_event(None, "WEEKLY_PING_ERROR", {"error": str(error)})
+
     async def run_forever(self) -> None:
         interval = float(self.config["scheduler"]["poll_interval_seconds"])
         while not self.stopping:
@@ -150,5 +160,8 @@ class Scheduler:
 
     async def stop(self) -> None:
         self.stopping = True
+        if self.weekly_ping_task:
+            self.weekly_ping_task.cancel()
+            await asyncio.gather(self.weekly_ping_task, return_exceptions=True)
         if self.running:
             await asyncio.gather(*self.running.values(), return_exceptions=True)

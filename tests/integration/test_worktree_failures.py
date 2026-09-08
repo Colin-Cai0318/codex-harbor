@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import subprocess
 
 import pytest
@@ -39,7 +40,7 @@ async def test_workspace_from_another_repository_and_unsafe_cleanup_are_rejected
 ):
     other = tmp_path / "other"
     other.mkdir()
-    subprocess.run(["git", "init", "-b", "main"], cwd=other, check=True, capture_output=True)
+    await asyncio.to_thread(subprocess.run, ["git", "init", "-b", "main"], cwd=other, check=True, capture_output=True)
     manager = WorktreeManager(repository, tmp_path / "worktrees")
     with pytest.raises(GitError, match="does not belong"):
         await manager.use_existing_workspace(git_repo, other)

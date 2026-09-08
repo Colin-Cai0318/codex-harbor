@@ -25,5 +25,7 @@ jobs:
         run: uv sync --extra dev
       - name: Test
         run: uv run pytest -q
+      - name: Lint
+        run: uvx ruff check --select E4,E7,E9,F,I,B017,B023,BLE001,ASYNC221,RUF012,RUF059 src tests tools
       - name: Compile
         run: uv run python -m compileall -q src tools tests
