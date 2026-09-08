@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field
 
 from ..codex import AppServerError
 from ..domain import (
@@ -57,6 +57,8 @@ class AutoResumeCreate(BaseModel):
     model: str = Field(min_length=1)
     reasoning_effort: str = Field(min_length=1)
     threshold: float = Field(default=95, ge=1, le=100)
+    trigger_mode: Literal["on_failure", "after_reset"] = "on_failure"
+    resume_after: AwareDatetime | None = None
     acceptance_commands: list[str] = Field(default_factory=list)
 
 
@@ -242,7 +244,13 @@ def create_app(
         )
         return guard(
             lambda: AutoResumeManager(repository, app_server_client).arm(
-                spec, thread, body.threshold
+                spec,
+                thread,
+                body.threshold,
+                trigger_mode=body.trigger_mode,
+                resume_after=body.resume_after.isoformat()
+                if body.resume_after
+                else None,
             )
         )
 

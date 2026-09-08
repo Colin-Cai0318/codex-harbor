@@ -1,5 +1,7 @@
 # Validation record
 
+Latest recovery correction: [explicit reset recovery](RESET-RESUME-2026-09-08.md).
+
 Latest release assessment: the [2026-09-08 full regression report](FULLTEST-2026-09-08.md)
 records the preceding 121-test
 baseline. The results below are archived evidence, not current release approval.
