@@ -227,7 +227,7 @@ async def test_weekly_reset_drains_freezes_and_manual_resume_runs_ready_luna_tas
     assert repository.get_task(queued["id"])["status"] == TaskStatus.READY
     assert CompletingWorker.seen == []
 
-    with TestClient(create_app(repository)) as client:
+    with TestClient(create_app(repository), base_url="http://127.0.0.1") as client:
         response = client.post("/api/pool/resume")
     assert response.status_code == 200
     assert response.json()["state"] == PoolStatus.RUNNING

@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from codex_harbor.api import create_app
+from codex_harbor.codex import ModelRegistry
 
 
 class FakeProjectClient:
@@ -53,13 +54,41 @@ class FakeProjectClient:
         return {}
 
 
+def test_hidden_reserve_model_is_not_exposed_by_model_picker(repository):
+    registry = ModelRegistry(
+        [
+            {
+                "model": "visible",
+                "displayName": "Visible",
+                "isDefault": True,
+                "defaultReasoningEffort": "low",
+                "supportedReasoningEfforts": [{"reasoningEffort": "low"}],
+            },
+            {
+                "model": "gpt-reserve",
+                "displayName": "GPT-Reserve",
+                "hidden": True,
+                "defaultReasoningEffort": "xhigh",
+                "supportedReasoningEfforts": [{"reasoningEffort": "xhigh"}],
+            },
+        ]
+    )
+    client = TestClient(
+        create_app(repository, model_registry=registry),
+        base_url="http://127.0.0.1",
+    )
+    assert [item["model"] for item in client.get("/api/models").json()] == [
+        "visible"
+    ]
+
+
 def test_api_and_dashboard(repository, git_repo):
     client = TestClient(
         create_app(
             repository,
             profiles={"deep_debug": {"reasoning_effort": "high"}},
         )
-    )
+    , base_url="http://127.0.0.1")
     created = client.post(
         "/api/tasks",
         json={
@@ -115,7 +144,7 @@ def test_dashboard_javascript_is_valid(repository):
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node.js is unavailable")
-    dashboard = TestClient(create_app(repository)).get("/").text
+    dashboard = TestClient(create_app(repository), base_url="http://127.0.0.1").get("/").text
     script = dashboard.split("<script>", 1)[1].split("</script>", 1)[0]
     checked = subprocess.run(
         [
@@ -134,7 +163,7 @@ def test_dashboard_javascript_is_valid(repository):
 
 
 def test_shared_task_group_api(repository, git_repo):
-    client = TestClient(create_app(repository))
+    client = TestClient(create_app(repository), base_url="http://127.0.0.1")
     response = client.post(
         "/api/task-groups",
         json={
@@ -164,7 +193,7 @@ def test_project_driven_creation_lists_and_reuses_codex_conversations(
     repository, git_repo
 ):
     app_client = FakeProjectClient(git_repo)
-    client = TestClient(create_app(repository, app_server_client=app_client))
+    client = TestClient(create_app(repository, app_server_client=app_client), base_url="http://127.0.0.1")
     message = "\n  Continue from the existing Codex context\n"
 
     threads = client.get("/api/codex/projects/project-1/threads")
@@ -208,7 +237,7 @@ def test_project_driven_creation_creates_codex_thread_with_workspace_roots(
                 "sandbox": "workspace-write",
             },
         )
-    )
+    , base_url="http://127.0.0.1")
 
     created = client.post(
         "/api/tasks",

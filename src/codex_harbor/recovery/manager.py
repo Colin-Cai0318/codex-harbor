@@ -33,4 +33,25 @@ class RecoveryManager:
                     )
                     recovered += 1
                 self.repository.remove_worker(worker["worker_id"])
+        # A process can die after claiming a task and before its first heartbeat.
+        # Recheck under the write lock so a late registration cannot be reclaimed.
+        with self.repository.db.transaction(immediate=True) as conn:
+            orphans = conn.execute(
+                "SELECT id FROM tasks t WHERE status IN ('CLAIMED','RUNNING') "
+                "AND updated_at < ? AND NOT EXISTS "
+                "(SELECT 1 FROM workers w WHERE w.worker_id=t.claimed_by AND w.task_id=t.id)",
+                (threshold.isoformat(),),
+            ).fetchall()
+            for task in orphans:
+                conn.execute(
+                    "UPDATE tasks SET status='READY',claimed_by=NULL,updated_at=? WHERE id=?",
+                    (datetime.now(UTC).isoformat(), task["id"]),
+                )
+                self.repository._event(
+                    conn,
+                    task["id"],
+                    "TASK_RECOVERY_QUEUED",
+                    {"reason": "orphaned_claim"},
+                )
+                recovered += 1
         return recovered

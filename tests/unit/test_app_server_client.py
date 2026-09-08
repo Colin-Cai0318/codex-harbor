@@ -69,3 +69,26 @@ async def test_project_matching_and_project_bound_thread_start(tmp_path):
         "thread/metadata/update",
         {"threadId": "thread-1", "projectId": "project-1"},
     )
+
+
+@pytest.mark.asyncio
+async def test_model_list_can_include_hidden_models():
+    client = AppServerClient(sys.executable)
+    requests: list[tuple[str, dict]] = []
+
+    async def fake_request(method, params=None, **kwargs):
+        requests.append((method, params or {}))
+        return {
+            "data": [{"model": "gpt-reserve", "hidden": True}],
+            "nextCursor": None,
+        }
+
+    client.request = fake_request  # type: ignore[method-assign]
+    models = await client.model_list(include_hidden=True)
+    assert models[0]["model"] == "gpt-reserve"
+    assert requests == [
+        (
+            "model/list",
+            {"cursor": None, "limit": 100, "includeHidden": True},
+        )
+    ]

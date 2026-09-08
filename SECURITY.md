@@ -2,11 +2,16 @@
 
 Codex Harbor is a local, single-user development tool. Its API can submit coding
 tasks and run configured acceptance commands with the local user's permissions.
-Keep the default `127.0.0.1` binding. The API has no authentication or multi-user
+The daemon enforces loopback binding (`127.0.0.1`, `localhost`, or `::1`). HTTP
+requests require a local Host header, and browser mutations must originate from
+the same origin. This protects local controls from cross-site form requests and
+DNS rebinding; it does not authenticate other local processes.
+The API has no authentication or multi-user
 authorization; do not expose the daemon directly to a public network.
 
 Codex Harbor 面向本机单用户开发。API 可以提交开发任务，并以本机用户权限执行
-配置的验收命令。请保留默认的 `127.0.0.1` 监听地址；当前没有身份认证和多用户
+配置的验收命令。daemon 强制仅监听回环地址，HTTP 请求校验本机 Host，浏览器修改
+请求必须同源，以防止跨站表单控制和 DNS 重绑定。本机其他进程仍被视为可信；当前没有身份认证和多用户
 权限隔离，不适合将 daemon 直接暴露到公网。公开 GitHub 源码不等于部署公网服务。
 
 Only import task definitions and acceptance commands that you trust. Keep local

@@ -74,7 +74,7 @@ async def main(workspace: Path, output: Path, execute: bool, coding_only: bool =
                                       QuotaManager(repository, CodexQuotaProvider(client)),
                                       RecoveryManager(repository), config, output)
                 app = create_app(repository, model_registry=registry, app_server_client=client)
-                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as api:
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as api:
                     async def create(message, *, existing=None, depends=None, acceptance=None, max_attempts=1, project_id=project_id):
                         response = await api.post("/api/tasks", json={
                             "message": message, "codex_project_id": project_id,

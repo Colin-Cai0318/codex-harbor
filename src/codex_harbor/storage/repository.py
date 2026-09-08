@@ -540,6 +540,17 @@ class HarborRepository:
         self, worker_id: str, *, grandfathered_only: bool = False
     ) -> dict[str, Any] | None:
         with self.db.transaction(immediate=True) as conn:
+            pool = conn.execute("SELECT * FROM pool_state WHERE id=1").fetchone()
+            if pool["state"] not in {PoolStatus.RUNNING, PoolStatus.DRAINING}:
+                return None
+            active = conn.execute(
+                "SELECT COUNT(*) FROM tasks WHERE status IN ('CLAIMED','RUNNING')"
+            ).fetchone()[0]
+            if active >= pool["max_workers"]:
+                return None
+            grandfathered_only = (
+                grandfathered_only or pool["state"] == PoolStatus.DRAINING
+            )
             conditions = ["t.status='READY'"]
             conditions.append(
                 "(t.root_thread_id IS NULL OR NOT EXISTS (SELECT 1 FROM tasks a "
