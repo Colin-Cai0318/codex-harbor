@@ -548,11 +548,15 @@ class Worker:
                 task["id"], TaskStatus.BLOCKED, reason=error_type
             )
         elif error_type == ErrorType.THREAD_BUSY:
+            consecutive = self.repository.consecutive_error_count(
+                task["id"], error_type
+            )
+            delay = min(1800, 60 * 2 ** max(0, consecutive - 1))
             self.repository.transition(
                 task["id"],
                 TaskStatus.RETRY_WAIT,
                 reason=error_type,
-                resume_at=(datetime.now(UTC) + timedelta(seconds=60)).isoformat(),
+                resume_at=(datetime.now(UTC) + timedelta(seconds=delay)).isoformat(),
             )
         else:
             failure_count = self.repository.record_failure(task["id"])
@@ -671,6 +675,24 @@ class Worker:
                     if task["status"] == TaskStatus.CANCELLED:
                         return
                     await self._handle_failure(task, attempt, error)
+                    stopped = self.repository.get_task(task["id"])
+                    try:
+                        self._save_envelope(
+                            stopped,
+                            config,
+                            worktree,
+                            head,
+                            str(stopped["status"]),
+                            str(error)[-2000:],
+                        )
+                    except OSError as checkpoint_error:
+                        # The persisted task/attempt must remain resumable even
+                        # when the optional checkpoint file cannot be replaced.
+                        self.repository.add_event(
+                            task["id"],
+                            "RECOVERY_CHECKPOINT_FAILED",
+                            {"error": str(checkpoint_error)[-1000:]},
+                        )
                     return
 
                 if (

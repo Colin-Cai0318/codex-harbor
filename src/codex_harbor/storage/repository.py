@@ -608,6 +608,21 @@ class HarborRepository:
             )
             return number
 
+    def consecutive_error_count(
+        self, task_id: str, error_type: str, limit: int = 6
+    ) -> int:
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                "SELECT error_type FROM attempts WHERE task_id=? ORDER BY attempt_number DESC LIMIT ?",
+                (task_id, limit),
+            ).fetchall()
+        count = 0
+        for row in rows:
+            if row["error_type"] != error_type:
+                break
+            count += 1
+        return count
+
     def finish_attempt(
         self,
         task_id: str,
