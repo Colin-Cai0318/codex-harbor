@@ -9,7 +9,6 @@ from codex_harbor.runtime.codex_app_server import (
     _turn_id,
 )
 
-
 CONFIG = EffectiveAgentConfig("model-a", "high", "model-a", "high")
 
 

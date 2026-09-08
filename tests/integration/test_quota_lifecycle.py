@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from typing import ClassVar
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,7 +19,6 @@ from codex_harbor.domain import (
 from codex_harbor.quota import FakeQuotaProvider, QuotaManager
 from codex_harbor.scheduler import Scheduler
 
-
 LUNA = "gpt-5.6-luna"
 
 
@@ -28,7 +28,7 @@ class RecoveryManagerStub:
 
 
 class CompletingWorker:
-    seen: list[dict] = []
+    seen: ClassVar[list[dict]] = []
 
     def __init__(self, repository, *args, **kwargs):
         self.repository = repository

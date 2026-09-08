@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from ..codex import AppServerClient, ModelRegistry
@@ -10,6 +10,8 @@ from ..runtime import CodexAppServerRuntime
 MODEL = "gpt-5.6-luna"
 EFFORT = "low"
 PROMPT = "Reply exactly OK. Do not use tools, read files, or perform any other work."
+# Live quota snapshots can revise the same weekly boundary by a few seconds.
+RESET_JITTER = timedelta(minutes=5)
 
 
 def boundary(value):
@@ -104,11 +106,22 @@ class WeeklyPingManager:
             ):
                 return
             reset = previous.isoformat()
-            claimed = conn.execute(
-                "INSERT OR IGNORE INTO weekly_pings(reset_at,status,started_at) VALUES(?,'STARTED',?)",
-                (reset, now.isoformat()),
-            ).rowcount
-            if current and current > previous:
+            duplicate = conn.execute(
+                "SELECT 1 FROM weekly_pings WHERE reset_at BETWEEN ? AND ?",
+                (
+                    (previous - RESET_JITTER).isoformat(),
+                    (previous + RESET_JITTER).isoformat(),
+                ),
+            ).fetchone()
+            claimed = (
+                conn.execute(
+                    "INSERT OR IGNORE INTO weekly_pings(reset_at,status,started_at) VALUES(?,'STARTED',?)",
+                    (reset, now.isoformat()),
+                ).rowcount
+                if not duplicate
+                else 0
+            )
+            if current and current > previous + RESET_JITTER:
                 conn.execute(
                     "UPDATE weekly_ping_settings SET observed_reset=? WHERE id=1",
                     (current.isoformat(),),
@@ -155,13 +168,13 @@ class WeeklyPingManager:
             },
         )
 
-    def observe_confirmation(self, windows):
+    def observe_confirmation(self, windows, *, now=None):
         weekly = next((w for w in windows if w.quota_type == "WEEKLY"), None)
         current = boundary(weekly.reset_at) if weekly else None
-        if not current:
+        if not current or current <= (now or datetime.now(UTC)):
             return
         with self.repository.db.connect() as conn:
             conn.execute(
                 "UPDATE weekly_pings SET next_reset_at=? WHERE status='SENT' AND next_reset_at IS NULL AND reset_at < ?",
-                (current.isoformat(), current.isoformat()),
+                (current.isoformat(), (current - RESET_JITTER).isoformat()),
             )

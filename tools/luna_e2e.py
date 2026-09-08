@@ -19,7 +19,7 @@ from codex_harbor.api import create_app
 from codex_harbor.codex import AppServerClient, AppServerError, ModelRegistry
 from codex_harbor.config import DEFAULTS
 from codex_harbor.domain import EffectiveAgentConfig, TaskStatus, utc_now
-from codex_harbor.quota import QuotaManager, CodexQuotaProvider
+from codex_harbor.quota import CodexQuotaProvider, QuotaManager
 from codex_harbor.recovery import RecoveryManager
 from codex_harbor.runtime import CodexAppServerRuntime
 from codex_harbor.scheduler import Scheduler
@@ -69,13 +69,13 @@ async def main(workspace: Path, output: Path, execute: bool, coding_only: bool =
                        quota={key: limits.get(key) for key in ("primary", "secondary")})
                 if not execute:
                     return
-                runtime = CodexAppServerRuntime(client)
+                runtime = CodexAppServerRuntime(client, isolated_workers=True)
                 scheduler = Scheduler(repository, runtime, registry,
                                       QuotaManager(repository, CodexQuotaProvider(client)),
                                       RecoveryManager(repository), config, output)
                 app = create_app(repository, model_registry=registry, app_server_client=client)
                 async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as api:
-                    async def create(message, *, existing=None, depends=None, acceptance=None, max_attempts=1):
+                    async def create(message, *, existing=None, depends=None, acceptance=None, max_attempts=1, project_id=project_id):
                         response = await api.post("/api/tasks", json={
                             "message": message, "codex_project_id": project_id,
                             "conversation_mode": "existing" if existing else "new",
@@ -87,7 +87,7 @@ async def main(workspace: Path, output: Path, execute: bool, coding_only: bool =
                         response.raise_for_status()
                         return response.json()
 
-                    async def run_to_settled(task_id):
+                    async def run_to_settled(task_id, scheduler=scheduler):
                         deadline = asyncio.get_running_loop().time() + 180
                         while asyncio.get_running_loop().time() < deadline:
                             await scheduler.tick()
@@ -115,13 +115,16 @@ async def main(workspace: Path, output: Path, execute: bool, coding_only: bool =
                             return
                         if phase == 1:
                             task = await create(f"This is a small Harbor test. Remember token {token} in this conversation. Reply with exactly that token. Do not use tools or change files.")
-                            first_id, thread_id = task["id"], task["root_thread_id"]
+                            first_id = task["id"]
                             result = await run_to_settled(first_id)
                             assert result["status"] == TaskStatus.SUCCEEDED
+                            thread_id = result["root_thread_id"]
+                            assert thread_id, "worker must persist its conversation identity"
                         else:
                             task = await create("Reply with the exact token I asked you to remember earlier. Do not use tools or change files.", existing=thread_id, depends=[first_id])
                             result = await run_to_settled(task["id"])
                             assert result["status"] == TaskStatus.SUCCEEDED
+                            assert result["root_thread_id"] == thread_id
                             history = await client.thread_read(thread_id)
                             turns = history["thread"]["turns"]
                             last_items = turns[-1].get("items", [])

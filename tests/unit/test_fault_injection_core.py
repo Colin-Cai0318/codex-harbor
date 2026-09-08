@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
+import tomllib
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import pytest
 
 from codex_harbor.config import load_config
 from codex_harbor.domain import PoolStatus, TaskSpec, TaskStatus
-from codex_harbor.execution.local import LocalBackend, WSLBackend, platform_summary, select_backend
+from codex_harbor.execution.local import (
+    LocalBackend,
+    WSLBackend,
+    platform_summary,
+    select_backend,
+)
 from codex_harbor.recovery import RecoveryManager
 from codex_harbor.scheduler import Scheduler
 
@@ -200,7 +204,7 @@ def test_backend_selection_platform_summary_and_malformed_config(tmp_path, monke
 
     config_file = tmp_path / "config.toml"
     config_file.write_text("[harbor\ninvalid", encoding="utf-8")
-    with pytest.raises(Exception):
+    with pytest.raises(tomllib.TOMLDecodeError):
         load_config(config_file)
 
     data_dir = tmp_path / "custom-data"

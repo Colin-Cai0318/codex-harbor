@@ -83,19 +83,20 @@ async def run(workspace, output):
         first = await work(first)
         thread_id = first["root_thread_id"]
         # A separate process must resume immediately after worker completion.
-        async with AppServerClient() as reserve:
-            reserve_runtime = CodexAppServerRuntime(reserve)
-            result = await reserve_runtime.resume_task(
+        # Ordinary Luna/xhigh tests continuity, not the native gpt-reserve bucket.
+        async with AppServerClient() as luna:
+            luna_runtime = CodexAppServerRuntime(luna)
+            result = await luna_runtime.resume_task(
                 thread_id,
                 str(workspace),
                 "Return only the exact CONTINUITY token I gave you earlier. Do not call tools or modify files.",
                 EffectiveAgentConfig(model, "xhigh", model, "xhigh"),
             )
             assert result.status == "completed", result.error
-            inspected = await reserve.thread_read(thread_id)
+            inspected = await luna.thread_read(thread_id)
             assert token in json.dumps(inspected["thread"]["turns"][-1]["items"])
             record(
-                "reserve_same_thread",
+                "luna_xhigh_same_thread",
                 thread_id=result.thread_id,
                 effort="xhigh",
                 context_retained=True,
