@@ -42,7 +42,7 @@ class ProjectClient:
 def test_project_flow_rejects_missing_server_project_message_and_conversation(
     repository, git_repo
 ):
-    no_server = TestClient(create_app(repository))
+    no_server = TestClient(create_app(repository), base_url="http://127.0.0.1")
     assert no_server.get("/api/codex/projects").json() == []
     assert (
         no_server.post(
@@ -58,7 +58,7 @@ def test_project_flow_rejects_missing_server_project_message_and_conversation(
     )
 
     app_client = ProjectClient(git_repo)
-    client = TestClient(create_app(repository, app_server_client=app_client))
+    client = TestClient(create_app(repository, app_server_client=app_client), base_url="http://127.0.0.1")
     assert client.post("/api/tasks", json={"message": "x"}).status_code == 409
     assert (
         client.post(
@@ -114,7 +114,7 @@ def test_new_conversation_rejects_empty_missing_and_non_git_workspaces(
     repository, git_repo, tmp_path
 ):
     empty_client = ProjectClient(git_repo, project_roots=False)
-    client = TestClient(create_app(repository, app_server_client=empty_client))
+    client = TestClient(create_app(repository, app_server_client=empty_client), base_url="http://127.0.0.1")
     payload = {
         "message": "x",
         "codex_project_id": "project-1",
@@ -143,7 +143,7 @@ def test_new_thread_is_deferred_until_worker_runs(repository, git_repo):
     client = TestClient(
         create_app(repository, app_server_client=app_client),
         raise_server_exceptions=False,
-    )
+     base_url="http://127.0.0.1")
     response = client.post(
         "/api/tasks",
         json={
@@ -157,7 +157,7 @@ def test_new_thread_is_deferred_until_worker_runs(repository, git_repo):
 
 
 def test_control_endpoints_return_explicit_errors(repository, git_repo):
-    client = TestClient(create_app(repository))
+    client = TestClient(create_app(repository), base_url="http://127.0.0.1")
     assert client.get("/api/tasks/does-not-exist").status_code == 404
     assert client.post("/api/pool/launch").status_code == 404
     assert (
@@ -174,6 +174,6 @@ def test_control_endpoints_return_explicit_errors(repository, git_repo):
 
 def test_codex_thread_list_transport_error_is_502(repository, git_repo):
     app_client = ProjectClient(git_repo)
-    client = TestClient(create_app(repository, app_server_client=app_client))
+    client = TestClient(create_app(repository, app_server_client=app_client), base_url="http://127.0.0.1")
     response = client.get("/api/codex/projects/broken/threads")
     assert response.status_code == 502

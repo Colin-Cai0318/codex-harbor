@@ -8,8 +8,23 @@ from codex_harbor import daemon
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("server_error", [None, RuntimeError("bind failed")])
-async def test_daemon_coordinates_scheduler_shutdown(monkeypatch, tmp_path, server_error):
+@pytest.mark.parametrize("bind", ["0.0.0.0", "192.168.1.1", "::"])
+async def test_daemon_rejects_network_binding_before_opening_codex(monkeypatch, bind):
+    container = SimpleNamespace(
+        config=SimpleNamespace(values={"harbor": {"bind": bind}})
+    )
+    monkeypatch.setattr(daemon.ApplicationContainer, "build", lambda _path: container)
+    with pytest.raises(ValueError, match="single-user"):
+        await daemon.serve()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "server_error", [None, RuntimeError("bind failed"), "scheduler-failed"]
+)
+async def test_daemon_coordinates_scheduler_shutdown(
+    monkeypatch, tmp_path, server_error
+):
     events = []
     values = {
         "codex": {"approval_policy": "never", "sandbox": "workspace-write"},
@@ -34,7 +49,7 @@ async def test_daemon_coordinates_scheduler_shutdown(monkeypatch, tmp_path, serv
 
     monkeypatch.setattr(daemon, "AppServerClient", lambda *_args, **_kwargs: Client())
 
-    async def load(_client):
+    async def load(_client, **_kwargs):
         return object()
 
     monkeypatch.setattr(daemon.ModelRegistry, "load", load)
@@ -45,6 +60,8 @@ async def test_daemon_coordinates_scheduler_shutdown(monkeypatch, tmp_path, serv
 
         async def run_forever(self):
             events.append("scheduler-run")
+            if server_error == "scheduler-failed":
+                raise RuntimeError("scheduler failed")
             while not self.stopping:
                 await daemon.asyncio.sleep(0)
 
@@ -60,16 +77,27 @@ async def test_daemon_coordinates_scheduler_shutdown(monkeypatch, tmp_path, serv
 
         async def serve(self):
             await daemon.asyncio.sleep(0)
+            if server_error == "scheduler-failed":
+                while not getattr(self, "should_exit", False):
+                    await daemon.asyncio.sleep(0)
+                return
             if server_error:
                 raise server_error
             events.append("server-served")
 
-    monkeypatch.setattr(daemon.uvicorn, "Config", lambda *args, **kwargs: (args, kwargs))
+    monkeypatch.setattr(
+        daemon.uvicorn, "Config", lambda *args, **kwargs: (args, kwargs)
+    )
     monkeypatch.setattr(daemon.uvicorn, "Server", Server)
 
     if server_error:
-        with pytest.raises(RuntimeError, match="bind failed"):
-            await daemon.serve("test.toml")
+        with pytest.raises(
+            RuntimeError,
+            match="scheduler failed"
+            if server_error == "scheduler-failed"
+            else "bind failed",
+        ):
+            await daemon.asyncio.wait_for(daemon.serve("test.toml"), timeout=2)
     else:
         await daemon.serve("test.toml")
     assert events[-2:] == ["scheduler-stop", "client-exit"]

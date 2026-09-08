@@ -10,7 +10,7 @@ from codex_harbor.scheduler import Scheduler
 
 @pytest.mark.parametrize("fields", [{"execution_backend": "typo"}, {"max_attempts": 0}])
 def test_invalid_task_is_rejected_before_scheduling(repository, git_repo, fields):
-    response = TestClient(create_app(repository)).post(
+    response = TestClient(create_app(repository), base_url="http://127.0.0.1").post(
         "/api/tasks", json={"title": "invalid", "prompt": "test", "repository": str(git_repo), **fields}
     )
     assert response.status_code == 409
@@ -28,7 +28,10 @@ async def test_worker_identity_is_not_reused_when_earlier_slot_finishes(
             ids.append(args[-1])
 
         async def run(self, task):
-            await asyncio.Event().wait()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                repository.transition(task["id"], "CANCELLED")
 
     class Quota:
         async def refresh(self):

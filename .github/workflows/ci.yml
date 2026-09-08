@@ -24,8 +24,17 @@ jobs:
       - name: Install
         run: uv sync --extra dev
       - name: Test
-        run: uv run pytest -q
+        run: uv run pytest -q --cov=codex_harbor --cov-branch --cov-fail-under=85
       - name: Lint
         run: uvx ruff check --select E4,E7,E9,F,I,B017,B023,BLE001,ASYNC221,RUF012,RUF059 src tests tools
       - name: Compile
         run: uv run python -m compileall -q src tools tests
+      - name: Build distribution
+        run: uv build
+      - name: Export locked runtime dependencies
+        run: uv export --no-dev --no-emit-project --no-hashes --format requirements-txt --output-file dist/runtime-requirements.txt
+      - name: Verify installed wheel outside source imports
+        run: uv run --isolated --no-project --with-requirements dist/runtime-requirements.txt --with ./dist/codex_harbor-0.1.0-py3-none-any.whl python -I -m codex_harbor --help
+      - name: Audit runtime dependencies
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
+        run: uvx pip-audit -r dist/runtime-requirements.txt --no-deps --disable-pip

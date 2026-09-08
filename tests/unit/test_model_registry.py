@@ -25,6 +25,31 @@ MODELS = [
 ]
 
 
+def test_hidden_model_is_resolvable_for_recovery_but_marked_hidden():
+    registry = ModelRegistry(
+        MODELS
+        + [
+            {
+                "model": "gpt-reserve",
+                "displayName": "GPT-Reserve",
+                "hidden": True,
+                "defaultReasoningEffort": "xhigh",
+                "supportedReasoningEfforts": [
+                    {"reasoningEffort": "xhigh", "description": ""}
+                ],
+            }
+        ]
+    )
+    assert registry.models["gpt-reserve"].hidden
+    config = registry.resolve(
+        task_model="gpt-reserve",
+        task_reasoning="xhigh",
+        global_model=None,
+        global_reasoning="medium",
+    )
+    assert config.effective_model == "gpt-reserve"
+
+
 def test_resolves_task_override_and_effective_config():
     config = ModelRegistry(MODELS).resolve(
         task_model="model-b",

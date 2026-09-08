@@ -58,14 +58,23 @@ class Scheduler:
             if future.done():
                 self.running.pop(task_id, None)
                 self.interrupting.discard(task_id)
-                if not future.cancelled() and future.exception():
+                if future.cancelled() or future.exception():
+                    reason = (
+                        "WORKER_CANCELLED" if future.cancelled() else "WORKER_CRASHED"
+                    )
                     self.repository.add_event(
-                        task_id, "WORKER_CRASHED", {"error": str(future.exception())}
+                        task_id,
+                        reason,
+                        {
+                            "error": "cancelled"
+                            if future.cancelled()
+                            else str(future.exception())
+                        },
                     )
                     task = self.repository.get_task(task_id)
                     if task["status"] in {TaskStatus.CLAIMED, TaskStatus.RUNNING}:
                         self.repository.transition(
-                            task_id, TaskStatus.BLOCKED, reason="WORKER_CRASHED"
+                            task_id, TaskStatus.BLOCKED, reason=reason
                         )
                         self.repository.clear_claim(task_id)
 

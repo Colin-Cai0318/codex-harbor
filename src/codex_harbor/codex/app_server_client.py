@@ -458,12 +458,17 @@ class AppServerClient:
         )
         return notification["params"]["turn"]
 
-    async def model_list(self) -> list[dict[str, Any]]:
+    async def model_list(self, *, include_hidden: bool = False) -> list[dict[str, Any]]:
         models: list[dict[str, Any]] = []
         cursor: str | None = None
         while True:
             result = await self.request(
-                "model/list", {"cursor": cursor, "limit": 100, "includeHidden": False}
+                "model/list",
+                {
+                    "cursor": cursor,
+                    "limit": 100,
+                    "includeHidden": include_hidden,
+                },
             )
             models.extend(result.get("data", []))
             cursor = result.get("nextCursor")

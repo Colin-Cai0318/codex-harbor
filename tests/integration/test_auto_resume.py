@@ -119,7 +119,7 @@ def test_api_registers_current_thread_without_project_or_model_inference(
     repository, git_repo
 ):
     reader = ThreadReader(git_repo)
-    client = TestClient(create_app(repository, app_server_client=reader))
+    client = TestClient(create_app(repository, app_server_client=reader), base_url="http://127.0.0.1")
     payload = {
         "thread_id": "original",
         "prompt": "Continue",
@@ -246,7 +246,7 @@ async def test_precreated_task_never_spends_reserve(repository, git_repo, monkey
 
 
 def test_reserve_setting_persists_and_uses_actual_reserve_model(repository):
-    client = TestClient(create_app(repository))
+    client = TestClient(create_app(repository), base_url="http://127.0.0.1")
     assert client.get("/api/recovery-settings").json()["allow_luna_reserve"] is False
     result = client.patch("/api/recovery-settings", json={"allow_luna_reserve": True})
     assert result.status_code == 200

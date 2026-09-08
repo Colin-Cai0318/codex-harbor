@@ -151,18 +151,24 @@ def build_parser() -> argparse.ArgumentParser:
 async def _runtime_parts(container: ApplicationContainer):
     codex_config = container.config.section("codex")
     client = AppServerClient(codex_config.get("executable") or None)
-    await client.start()
-    registry = await ModelRegistry.load(client)
+    try:
+        await client.start()
+        registry = await ModelRegistry.load(client, include_hidden=True)
+    except BaseException:
+        await client.close()
+        raise
     runtime = CodexAppServerRuntime(
         client,
         approval_policy=codex_config.get("approval_policy", "never"),
         sandbox=codex_config.get("sandbox", "workspace-write"),
+        isolated_workers=True,
     )
     return client, registry, runtime
 
 
 async def _run_scheduler(container: ApplicationContainer) -> None:
     client, registry, runtime = await _runtime_parts(container)
+    scheduler = None
     try:
         config = container.config.values
         scheduler = Scheduler(
@@ -179,7 +185,11 @@ async def _run_scheduler(container: ApplicationContainer) -> None:
         )
         await scheduler.run_forever()
     finally:
-        await client.close()
+        try:
+            if scheduler:
+                await scheduler.stop()
+        finally:
+            await client.close()
 
 
 async def _doctor(container: ApplicationContainer) -> int:

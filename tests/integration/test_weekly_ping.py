@@ -161,14 +161,14 @@ async def test_slow_ping_does_not_block_scheduler_and_shutdown(
 
 
 def test_api_persists_switch_and_preserves_reserve(repository):
-    client = TestClient(create_app(repository))
+    client = TestClient(create_app(repository), base_url="http://127.0.0.1")
     assert client.get("/api/weekly-ping").json()["enabled"] is False
     assert (
         client.patch("/api/weekly-ping", json={"enabled": True}).json()["model"]
         == "gpt-5.6-luna"
     )
     assert (
-        TestClient(create_app(repository)).get("/api/weekly-ping").json()["enabled"]
+        TestClient(create_app(repository), base_url="http://127.0.0.1").get("/api/weekly-ping").json()["enabled"]
         is True
     )
     assert client.get("/api/recovery-settings").json()["allow_luna_reserve"] is False

@@ -18,6 +18,7 @@ class ModelCapability:
     model: str
     display_name: str
     is_default: bool
+    hidden: bool
     reasoning_efforts: set[str]
     default_reasoning_effort: str
 
@@ -29,6 +30,7 @@ class ModelRegistry:
                 model=item["model"],
                 display_name=item.get("displayName", item["model"]),
                 is_default=bool(item.get("isDefault")),
+                hidden=bool(item.get("hidden")),
                 reasoning_efforts={
                     option["reasoningEffort"]
                     for option in item.get("supportedReasoningEfforts", [])
@@ -39,8 +41,15 @@ class ModelRegistry:
         }
 
     @classmethod
-    async def load(cls, client: AppServerClient) -> ModelRegistry:
-        return cls(await client.model_list())
+    async def load(
+        cls, client: AppServerClient, *, include_hidden: bool = False
+    ) -> ModelRegistry:
+        models = (
+            await client.model_list(include_hidden=True)
+            if include_hidden
+            else await client.model_list()
+        )
+        return cls(models)
 
     def default_model(self) -> ModelCapability | None:
         return next((model for model in self.models.values() if model.is_default), None)

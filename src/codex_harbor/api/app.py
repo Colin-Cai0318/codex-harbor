@@ -20,6 +20,7 @@ from ..quota.weekly_ping import WeeklyPingManager
 from ..recovery.auto_resume import AutoResumeManager
 from ..storage import HarborRepository
 from .dashboard import DASHBOARD
+from .local_guard import LocalRequestGuard
 
 
 class TaskCreate(BaseModel):
@@ -117,6 +118,7 @@ def create_app(
     codex_settings: dict[str, Any] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Codex Harbor", version="0.1.0")
+    app.add_middleware(LocalRequestGuard)
     configured_profiles = profiles or {}
 
     def guard(call: Any) -> Any:
@@ -508,6 +510,7 @@ def create_app(
                 "reasoning_efforts": sorted(item.reasoning_efforts),
             }
             for item in model_registry.models.values()
+            if not item.hidden
         ]
 
     @app.get("/api/profiles")
