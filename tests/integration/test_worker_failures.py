@@ -216,6 +216,53 @@ class ForkingClient:
 
 
 @pytest.mark.asyncio
+async def test_parent_conversation_keeps_cwd_and_validates_child_repository(
+    repository, git_repo, tmp_path, config_values
+):
+    original_cwd = str(git_repo.parent)
+
+    class Client(ForkingClient):
+        async def thread_read(self, thread_id, **kwargs):
+            return {"thread": {"id": thread_id, "cwd": original_cwd}}
+
+        async def thread_resume(self, thread_id, **kwargs):
+            assert thread_id == "original"
+            assert kwargs["cwd"] == original_cwd
+            return {"thread": {"id": thread_id}}
+
+        async def turn_start(self, thread_id, prompt, **kwargs):
+            assert kwargs["cwd"] == original_cwd
+            return await super().turn_start(thread_id, prompt, **kwargs)
+
+    task = repository.create_task(
+        TaskSpec(
+            title="child repository",
+            repository=str(git_repo),
+            prompt="continue",
+            conversation_mode="existing",
+            origin_thread_id="original",
+            conversation_cwd=original_cwd,
+            preserve_thread_name=True,
+        )
+    )
+    client = Client()
+    worker = worker_for(
+        repository,
+        CodexAppServerRuntime(client),
+        git_repo,
+        tmp_path,
+        config_values,
+        "parent-worker",
+    )
+    await worker.run(repository.claim_next("parent-worker"))
+    result = repository.get_task(task["id"])
+    assert result["status"] == "SUCCEEDED"
+    assert result["worktree_path"] == str(git_repo)
+    assert result["root_thread_id"] == "original"
+    assert client.started == 0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("fork_fails", "expected_thread", "new_starts"),
     [(False, "thread-fork", 0), (True, "thread-new", 1)],

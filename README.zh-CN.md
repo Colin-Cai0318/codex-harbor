@@ -228,6 +228,15 @@ uv run harbor doctor
 uv run harbor daemon
 ```
 
+Windows 可在完成 `uv sync` 后运行 `powershell.exe -NoProfile -File tools/windows-daemon.ps1 -Install`，
+为当前用户登记登录自启动。运行 `Start-ScheduledTask -TaskName CodexHarbor-Daemon` 可立即启动；
+请先结束手动启动的 Harbor，避免重复守护进程。任务以普通权限隐藏运行，异常退出后最多重启三次，
+日志位于 `%LOCALAPPDATA%\CodexHarbor\logs`。电脑关机或用户未登录时不会执行。
+卸载自启动可运行 `Unregister-ScheduledTask -TaskName CodexHarbor-Daemon -Confirm:$false`。
+
+原对话工作区位于 Git 仓库的上层目录时，`POST /api/recovery-watches` 的 JSON 可额外传入
+`repository` 指定该工作区内的目标仓库；原 Thread 和对话工作区仍保留。
+
 浏览器打开 <http://127.0.0.1:8765>，点击“新建任务”，选择 Codex 应用中同一个
 项目，再选择已有对话或新建对话，输入一条任务消息后发送。正常使用不再要求先
 注册仓库，也不需要额外的提示词模板。
