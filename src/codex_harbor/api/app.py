@@ -52,6 +52,7 @@ class TaskCreate(BaseModel):
 
 class AutoResumeCreate(BaseModel):
     thread_id: str = Field(min_length=1)
+    repository: str | None = None
     prompt: str = Field(min_length=1)
     title: str = "自动恢复当前任务"
     model: str = Field(min_length=1)
@@ -226,7 +227,14 @@ def create_app(
             raise HTTPException(
                 409, "original conversation identity or workspace is missing"
             )
-        root = await git_root(thread["cwd"])
+        root = await git_root(body.repository or thread["cwd"])
+        original_cwd = Path(thread["cwd"]).expanduser().resolve()
+        selected_root = Path(root).resolve()
+        if not (
+            original_cwd.is_relative_to(selected_root)
+            or selected_root.is_relative_to(original_cwd)
+        ):
+            raise HTTPException(409, "repository is outside the original workspace")
         repository.add_repository(root)
         spec = TaskSpec(
             title=body.title,

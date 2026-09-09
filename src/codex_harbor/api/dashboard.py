@@ -407,6 +407,7 @@ DASHBOARD = r"""<!doctype html>
         'task.turnFailures':'Turn {turn} · failures {failures}/{max}', 'task.taskOne':'task', 'task.taskMany':'tasks',
         'theme.useLight':'Use light theme', 'theme.useDark':'Use dark theme',
         'status.CREATED':'Created', 'status.PENDING':'Pending', 'status.WAIT_DEP':'Waiting for dependencies', 'status.READY':'Ready', 'status.CLAIMED':'Claimed', 'status.RUNNING':'Running', 'status.WAIT_QUOTA':'Waiting for quota', 'status.RETRY_WAIT':'Retry waiting', 'status.BLOCKED':'Blocked', 'status.SUCCEEDED':'Succeeded', 'status.FAILED':'Failed', 'status.CANCELLED':'Cancelled',
+        'detail.nextRetry':'Next retry', 'detail.writerHelp':'The original conversation is held by another Codex process. After its work finishes, close the owning client to release it. Harbor will retry the same conversation; no model turn starts while this lock blocks resume.',
         'poolState.RUNNING':'Running', 'poolState.PAUSED':'Paused', 'poolState.DRAINING':'Draining', 'poolState.FROZEN':'Frozen'
       },
       'zh-CN': {
@@ -430,6 +431,7 @@ DASHBOARD = r"""<!doctype html>
         'task.turnFailures':'第 {turn} 轮 · 失败 {failures}/{max}', 'task.taskOne':'任务', 'task.taskMany':'任务',
         'theme.useLight':'切换到白天模式', 'theme.useDark':'切换到黑夜模式',
         'status.CREATED':'已创建', 'status.PENDING':'待调度', 'status.WAIT_DEP':'等待依赖', 'status.READY':'就绪', 'status.CLAIMED':'已领取', 'status.RUNNING':'运行中', 'status.WAIT_QUOTA':'等待额度', 'status.RETRY_WAIT':'等待重试', 'status.BLOCKED':'已阻塞', 'status.SUCCEEDED':'已成功', 'status.FAILED':'已失败', 'status.CANCELLED':'已取消',
+        'detail.nextRetry':'下次重试', 'detail.writerHelp':'原对话被另一个 Codex 进程持有。待其工作结束后，关闭持有该对话的客户端以释放写入权。Harbor 会重试原对话；写入锁阻止恢复期间不会启动模型回合。',
         'poolState.RUNNING':'运行中', 'poolState.PAUSED':'已暂停', 'poolState.DRAINING':'排空中', 'poolState.FROZEN':'已冻结'
       }
     };
@@ -685,13 +687,14 @@ DASHBOARD = r"""<!doctype html>
           [t('detail.conversationMode'), task.conversation_mode || '—'], [t('detail.conversationCwd'), task.conversation_cwd || '—'],
           [t('detail.workspaceRoots'), (task.runtime_workspace_roots || []).join('\n') || '—'],
           [t('detail.rootThread'), task.root_thread_id || '—'], [t('detail.activeThread'), activeThread.thread_id || '—'],
-          [t('detail.worktree'), task.worktree_path || '—'], [t('detail.blockedReason'), task.blocked_reason || '—']
+          [t('detail.worktree'), task.worktree_path || '—'], [t('detail.blockedReason'), task.blocked_reason || '—'],
+          [t('detail.nextRetry'), task.resume_at ? new Date(task.resume_at).toLocaleString() : '—']
         ].map(item => detailItem(item[0], item[1])).join('');
         byId('detailModel').value = task.model || '';
         byId('detailReasoning').value = task.reasoning_effort || '';
         byId('detailAcceptance').textContent = (task.acceptance_commands || []).join('\n') || t('common.noCommands');
         byId('detailEvents').textContent = events.map(event => `${event.timestamp}  ${event.event_type}\n${event.payload ? JSON.stringify(event.payload, null, 2) : ''}`).join('\n\n') || t('common.noEvents');
-        byId('detailStatus').textContent = '';
+        byId('detailStatus').textContent = task.blocked_reason === 'THREAD_BUSY' ? t('detail.writerHelp') : '';
         byId('retryTask').disabled = !['FAILED','BLOCKED','CANCELLED'].includes(task.status);
         byId('cancelTask').disabled = ['SUCCEEDED','CANCELLED'].includes(task.status);
         if (!byId('detailDialog').open) byId('detailDialog').showModal();

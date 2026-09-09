@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
@@ -250,6 +251,33 @@ def test_api_registers_current_thread_without_project_or_model_inference(
         client.post(f"/api/recovery-watches/{one.json()['id']}/cancel").status_code
         == 200
     )
+
+
+def test_recovery_can_select_child_repository_without_changing_conversation(
+    repository, git_repo, tmp_path
+):
+    reader = ThreadReader(git_repo.parent)
+    client = TestClient(
+        create_app(repository, app_server_client=reader), base_url="http://127.0.0.1"
+    )
+    payload = {
+        "thread_id": "original",
+        "repository": str(git_repo),
+        "prompt": "Continue",
+        "model": "model-a",
+        "reasoning_effort": "high",
+    }
+    result = client.post("/api/recovery-watches", json=payload)
+    assert result.status_code == 201, result.text
+    spec = json.loads(result.json()["spec"])
+    assert spec["repository"] == str(git_repo)
+    assert spec["conversation_cwd"] == str(git_repo.parent)
+    assert spec["origin_thread_id"] == "original"
+    assert spec["conversation_mode"] == "existing"
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    reader.thread["cwd"] = str(unrelated)
+    assert client.post("/api/recovery-watches", json=payload).status_code == 409
 
 
 @pytest.mark.asyncio

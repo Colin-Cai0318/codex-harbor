@@ -348,6 +348,12 @@ class Worker:
                     )
                     origin = inspected.get("thread", inspected)
                     candidate = origin.get("cwd") or candidate
+                    # A conversation may start above its target Git repository.
+                    # Git validation/checkpoints use the selected repository;
+                    # resume still uses the unchanged conversation_cwd.
+                    repo_path = Path(task["repository"]).resolve()
+                    if repo_path.is_relative_to(Path(candidate).resolve()):
+                        candidate = str(repo_path)
                 except AppServerError as error:
                     self.repository.add_event(
                         task["id"],
