@@ -8,7 +8,7 @@ DASHBOARD = r"""<!doctype html>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>Codex Harbor</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><text y=%2252%22 x=%2250%22 text-anchor=%22middle%22 dominant-baseline=%22middle%22 font-size=%2250%22>⚓</text></svg>">
+  <link rel="icon" href="/assets/harbor.svg" type="image/svg+xml">
   <style>
     :root {
       color-scheme: light;
@@ -289,9 +289,10 @@ DASHBOARD = r"""<!doctype html>
   </style>
 </head>
 <body>
+  <link rel="stylesheet" href="/assets/desktop.css">
   <div class="shell">
     <header class="appbar">
-      <div class="brand"><span class="brandmark">⌁</span><span>Codex Harbor</span></div>
+      <div class="brand"><img class="brandmark" src="/assets/harbor.svg" alt=""><span>Codex Harbor</span></div>
       <div class="app-actions">
         <span id="lastUpdated" class="updated" data-i18n="runtime.connecting">Connecting…</span>
         <label class="sr-only" for="languageSelect" data-i18n="language.label">Language</label>
@@ -300,7 +301,18 @@ DASHBOARD = r"""<!doctype html>
       </div>
     </header>
 
-    <main class="page">
+    <aside class="sidebar" aria-label="主导航">
+      <div class="sidebar-caption">WORKSPACE</div>
+      <nav>
+        <button type="button" class="nav-item active" data-page="tasks"><span>▦</span><span data-copy="tasks">任务中心</span></button>
+        <button type="button" class="nav-item" data-page="recovery"><span>↻</span><span data-copy="recovery">恢复保护</span></button>
+        <button type="button" class="nav-item" data-page="repositories"><span>▱</span><span data-copy="repositories">工作空间</span></button>
+        <button type="button" class="nav-item" data-page="activity"><span>≋</span><span data-copy="activity">运行记录</span></button>
+        <button type="button" class="nav-item" data-page="settings"><span>⚙</span><span data-copy="settings">偏好设置</span></button>
+      </nav>
+      <div class="sidebar-footer"><span class="harbor-dot"></span> LOCAL FIRST<p data-copy="local">任务留在本机，工作持续向前。</p></div>
+    </aside>
+    <main class="page" data-current-page="tasks">
       <section class="hero">
         <div><h1 data-i18n="hero.title">Task board</h1><p data-i18n="hero.subtitle">Persistent Codex work, organized by lifecycle and kept safe across processes.</p></div>
         <span id="poolPill" class="pool-pill" data-state="LOADING">LOADING</span>
@@ -346,6 +358,9 @@ DASHBOARD = r"""<!doctype html>
 
       <section id="board" class="board" aria-label="Task status board">
         <div class="lane skeleton"></div><div class="lane skeleton"></div><div class="lane skeleton"></div>
+      </section>
+      <section id="desktopPanel" hidden aria-live="polite">
+        <div id="panelContent"></div>
       </section>
     </main>
   </div>
@@ -810,6 +825,7 @@ DASHBOARD = r"""<!doctype html>
     Promise.all([loadOptions(), refresh()]).catch(showError);
     setInterval(() => { if (!document.hidden) refresh(); }, 3000);
   </script>
+  <script src="/assets/desktop.js"></script>
 </body>
 </html>
 """

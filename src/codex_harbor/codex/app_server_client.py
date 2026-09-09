@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
+import subprocess
 from collections import defaultdict
 from pathlib import Path
 from types import TracebackType
@@ -78,6 +80,7 @@ class AppServerClient:
             # Thread history and tool results routinely exceed asyncio's 64 KiB
             # readline default. JSON-RPC uses one complete message per line.
             limit=32 * 1024 * 1024,
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
         )
         self._reader_task = asyncio.create_task(self._read_stdout())
         self._stderr_task = asyncio.create_task(self._read_stderr())
