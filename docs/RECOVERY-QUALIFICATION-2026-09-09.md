@@ -5,8 +5,9 @@
 - The PC booted at 08:22 Hong Kong time on September 9. Harbor was absent and
   port 8765 refused connections. Its durable T008 task remained in RETRY_WAIT.
 - Installed the current user's `CodexHarbor-Daemon` Windows task: interactive
-  logon, limited privileges, hidden process, three restarts one minute apart on
-  failure, no execution time limit. Starting it loads the existing database.
+  logon, limited privileges, hidden process, no execution time limit. Its wrapper
+  checks daemon exit codes and allows three restarts one minute apart on failure.
+  Starting it loads the existing database.
   This does not run before login or while the computer is off.
 - A live two-process test against an idle test conversation rejected the second
   writer even after that second connection requested unsubscribe (`notLoaded`).
@@ -45,5 +46,14 @@ sent in this qualification. Fault-injection tests cover quota detection,
 single-use Reserve failure/success, persistence, and original model/thread
 restoration; they do not establish the real service's exhausted-quota behavior.
 
-Windows task registration and manual launch are verified; a subsequent actual
-reboot/logon and an actual process-crash restart remain to be observed.
+Windows task registration and manual launch are verified. The initial Task
+Scheduler failure-restart setting did not restart the manually launched task in
+the crash test, so retries moved into the wrapper. Killing the idle daemon then
+produced a logged nonzero exit, a new listener process after the one-minute delay,
+and the unchanged T008 thread/attempt/status from SQLite. An actual subsequent
+reboot/logon remains to be observed. The wrapper stops retrying after three
+failures; logs remain available for diagnosing a persistent startup problem.
+
+Validation: the full 161-test Ubuntu/Windows, Python 3.11/3.13 CI matrix passed
+for the API/worker/dashboard changes. The wrapper revision was verified by the
+live process-crash test above. Ruff and compilation also passed.
