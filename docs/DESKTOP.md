@@ -58,12 +58,12 @@ uv run --extra desktop --extra bundle python tools/build_desktop.py
 ```powershell
 uv run --extra dev pytest -q
 uv run --extra desktop python tools/verify_desktop.py
-uv run --extra desktop python tools/verify_packaged_desktop.py
+uv run --extra desktop --extra bundle python tools/verify_packaged_desktop.py
 ```
 
 第二条命令使用独立临时数据库、模拟 API 和真实 Qt/WebEngine，验证五个页面、无横向溢出、托盘隐藏恢复和设置页重新进入，并生成 `.harbor/desktop-qa/` 截图。它不执行 Codex 模型回合，不证明真实额度重置、Windows 重启恢复或长期运行结果。原生窗口代码由该独立 GUI 测试覆盖，不计入无图形环境的 pytest 行覆盖率。
 
-第三条命令运行实际 EXE，在临时 API 上验证打包界面、兼容旧服务和本机 API 写入。测试仅为该进程开启回环 DevTools 端口，并在结束时停止测试进程。正常启动不会启用该端口。
+第三条命令先逐尺寸比对 EXE 内嵌图标与生成的 ICO，再运行实际 EXE，在临时 API 上验证打包界面、兼容旧服务和本机 API 写入。构建脚本使用带 SVG 内容摘要的 ICO 文件名，确保修改图标后 PyInstaller 会更新 EXE 图标资源。测试仅为该进程开启回环 DevTools 端口，并在结束时停止测试进程。正常启动不会启用该端口。
 
 2026-09-10 本机验证：167 项全量测试通过，包含分支的总体覆盖率为 86.00%，其中包括 Windows 自启动注册表模拟测试。真实 GUI 验证包含五个页面、托盘隐藏恢复、设置导航、设置持久化和单实例唤起；打包 EXE 的三项检查通过。船锚图标已检查浅色、深色背景与 16–48 像素显示效果；运行 `python tools/render_icon_preview.py` 可重新生成 README 预览。测试使用独立数据，不触发真实模型任务。
 

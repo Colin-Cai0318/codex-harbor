@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import socket
@@ -12,7 +13,9 @@ import time
 import urllib.request
 from pathlib import Path
 
+import pefile
 import uvicorn
+from PIL import Image
 from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer, QUrl
 from PySide6.QtWebSockets import QWebSocket
 
@@ -67,6 +70,23 @@ def evaluate(address, expression):
 
 def main():
     root = Path(__file__).resolve().parents[1]
+    # An SVG-only rebuild must also refresh Windows Explorer's embedded icon.
+    expected = Image.open(root / "build/desktop/harbor.ico")
+    embedded_sizes = set()
+    with pefile.PE(str(root / "dist/CodexHarbor/CodexHarbor.exe")) as executable:
+        for resource in executable.DIRECTORY_ENTRY_RESOURCE.entries:
+            if resource.id != 3:  # RT_ICON
+                continue
+            for item in resource.directory.entries:
+                entry = item.directory.entries[0].data.struct
+                pixels = executable.get_data(entry.OffsetToData, entry.Size)
+                icon = Image.open(io.BytesIO(pixels)).convert("RGBA")
+                assert (
+                    icon.tobytes()
+                    == expected.ico.getimage(icon.size).convert("RGBA").tobytes()
+                ), f"Stale embedded icon: {icon.size}"
+                embedded_sizes.add(icon.size)
+    assert embedded_sizes == expected.ico.sizes(), embedded_sizes
     app = QCoreApplication([])
     with tempfile.TemporaryDirectory(prefix="harbor-packaged-") as folder:
         port, debug_port = free_port(), free_port()
@@ -151,6 +171,7 @@ def main():
                 json.dumps(
                     {
                         "passed": [
+                            "embedded-icon-all-sizes",
                             "frozen-ui",
                             "legacy-service-attachment",
                             "same-origin-api-mutation",

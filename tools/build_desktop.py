@@ -1,5 +1,6 @@
 """Build a self-contained desktop directory; run with the bundle/desktop extras."""
 
+import hashlib
 import os
 import subprocess
 import sys
@@ -20,10 +21,17 @@ painter = QPainter(canvas)
 QSvgRenderer(str(root / "src/codex_harbor/assets/harbor.svg")).render(painter)
 painter.end()
 canvas.save(str(build / "harbor.png"))
+# PyInstaller tracks the icon filename, not changes to its contents. A digest
+# in the input filename invalidates the EXE cache when the SVG is redesigned.
+icon_digest = hashlib.sha256(
+    (root / "src/codex_harbor/assets/harbor.svg").read_bytes()
+).hexdigest()[:12]
+icon_path = build / f"harbor-{icon_digest}.ico"
 Image.open(build / "harbor.png").save(
-    build / "harbor.ico",
+    icon_path,
     sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
 )
+(build / "harbor.ico").write_bytes(icon_path.read_bytes())
 subprocess.run(
     [
         sys.executable,
@@ -35,7 +43,7 @@ subprocess.run(
         "--name",
         "CodexHarbor",
         "--icon",
-        str(build / "harbor.ico"),
+        str(icon_path),
         "--specpath",
         str(build),
         "--workpath",
