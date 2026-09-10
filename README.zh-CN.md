@@ -1,6 +1,8 @@
 <div align="center">
 
-# ⚓ Codex Harbor（代码港）
+<img src="src/codex_harbor/assets/harbor.svg" width="88" height="88" alt="Codex Harbor 船锚图标">
+
+# Codex Harbor（代码港）
 
 ### 面向 Codex 的持久化任务编排器
 
@@ -16,6 +18,26 @@
 [English](README.md) · **简体中文**
 
 </div>
+
+## 桌面应用
+
+独立窗口、系统托盘、后台常驻、单实例唤起，以及可选的 Windows 登录自启。
+任务中心、恢复保护、工作空间、运行记录与偏好设置统一在简洁界面中，支持中英文和明暗主题。
+
+```powershell
+uv run --extra desktop harbor-desktop
+```
+
+关闭窗口后任务继续运行；通过托盘菜单重新打开、暂停/恢复调度或退出。
+原创矢量图标采用明确的船锚造型，搭配米白锚身、低饱和松绿底色和浅鼠尾草绿边缘，
+同一图标在白天、黑夜模式及系统托盘中均保持清晰协调。
+
+![船锚图标在浅色和深色背景中的预览](docs/images/anchor-preview.png)
+
+构建 Windows 应用：`uv run --extra desktop --extra bundle python tools/build_desktop.py`。
+双击 `dist/CodexHarbor/CodexHarbor.exe` 即可运行，请保留整个目录。
+执行任务仍需要已登录的 Codex CLI 和 Git。
+详细操作、构建步骤和验证边界见 [桌面版说明](docs/DESKTOP.md)。
 
 ## 当前对话自动恢复
 

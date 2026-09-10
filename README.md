@@ -1,6 +1,8 @@
 <div align="center">
 
-# ⚓ Codex Harbor
+<img src="src/codex_harbor/assets/harbor.svg" width="88" height="88" alt="Codex Harbor anchor icon">
+
+# Codex Harbor
 
 ### Durable task orchestration for Codex
 
@@ -17,6 +19,27 @@ recovery across processes.
 **English** · [简体中文](README.zh-CN.md)
 
 </div>
+
+## Desktop application
+
+A native window with a system tray, background scheduling, single-instance activation,
+and optional Windows login startup. Manage tasks, recovery protection, workspaces,
+activity, and preferences in a clean interface with light/dark themes and English/Chinese support.
+
+```powershell
+uv run --extra desktop harbor-desktop
+```
+
+Closing the window keeps Harbor running in the tray. Use the tray menu to reopen,
+pause/resume scheduling, or quit. The original vector anchor uses an ivory foreground,
+muted evergreen tile, and sage edge so the same icon stays legible on light and dark backgrounds.
+
+![Light and dark anchor icon preview](docs/images/anchor-preview.png)
+
+Build the Windows app with `uv run --extra desktop --extra bundle python tools/build_desktop.py`.
+Run `dist/CodexHarbor/CodexHarbor.exe`, keeping its entire directory together.
+Codex CLI (signed in) and Git are still required to execute tasks.
+See [desktop setup, build instructions, and validation limits](docs/DESKTOP.md).
 
 ## Recover the current conversation after quota exhaustion
 

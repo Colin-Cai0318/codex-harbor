@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import AwareDatetime, BaseModel, Field
 
 from ..codex import AppServerError
@@ -172,6 +172,21 @@ def create_app(
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def dashboard() -> str:
         return DASHBOARD
+
+    @app.get("/api/health")
+    async def health() -> dict[str, str]:
+        return {"application": "codex-harbor", "status": "ready"}
+
+    @app.get("/assets/harbor.svg", include_in_schema=False)
+    async def icon() -> FileResponse:
+        return FileResponse(Path(__file__).parent.parent / "assets" / "harbor.svg", media_type="image/svg+xml")
+
+    @app.get("/assets/{name}", include_in_schema=False)
+    async def desktop_asset(name: str) -> FileResponse:
+        if name not in {"desktop.css", "desktop.js"}:
+            raise HTTPException(404, "unknown asset")
+        return FileResponse(Path(__file__).parent.parent / "assets" / name,
+                            media_type="text/css" if name.endswith(".css") else "text/javascript")
 
     @app.get("/api/tasks")
     async def list_tasks() -> list[dict[str, Any]]:

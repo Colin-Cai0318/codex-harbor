@@ -20,6 +20,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+desktop = ["PySide6>=6.8,<7"]
+bundle = ["pyinstaller>=6.11,<7", "Pillow>=11,<13"]
 dev = [
   "httpx>=0.28,<1",
   "pytest>=8.3,<9",
@@ -30,6 +32,9 @@ dev = [
 [project.scripts]
 harbor = "codex_harbor.cli:main"
 codex-harbord = "codex_harbor.daemon:main"
+
+[project.gui-scripts]
+harbor-desktop = "codex_harbor.desktop:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/codex_harbor"]
